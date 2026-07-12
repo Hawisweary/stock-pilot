@@ -19,6 +19,17 @@ def main() -> int:
     parser.add_argument("job", choices=["nightly", "weekly", "daily", "technical_retry"])
     args = parser.parse_args()
 
+    # 跨进程互斥：同类作业全系统只允许一个实例（防调度误触发/保活风暴导致重复发射）
+    import fcntl
+
+    lock_path = f"/tmp/afr_job_{args.job}.lock"
+    lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(json.dumps({"job": args.job, "ok": False, "summary": "已有同类作业在运行,本次跳过"}, ensure_ascii=False))
+        return 0
+
     if args.job == "nightly":
         from services.v5_data_sync import sync_v5_nightly_fetch
 

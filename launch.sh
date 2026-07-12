@@ -7,8 +7,9 @@
 #   ./launch.sh stop|status
 # ==============================================
 
-# 确保 node/npm/npx/python 可被 nohup 子进程找到（Tauri 启动时 PATH 不完整）
-export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:$PATH"
+# 确保 node/npm/npx/python/lsof 可被 nohup 子进程找到（Tauri/沙箱环境 PATH 不完整;
+# /usr/sbin 必须显式加入,否则 lsof 找不到导致保活永远误判服务离线而无限重启）
+export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/backend"
