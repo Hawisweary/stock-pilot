@@ -1,0 +1,16 @@
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY frontend/package*.json ./frontend/
+RUN cd frontend && npm ci
+COPY frontend ./frontend
+RUN cd frontend && npm run build
+
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=build /app/frontend/.next ./frontend/.next
+COPY --from=build /app/frontend/node_modules ./frontend/node_modules
+COPY --from=build /app/frontend/package.json ./frontend/
+COPY --from=build /app/frontend/public ./frontend/public
+WORKDIR /app/frontend
+EXPOSE 3000
+CMD ["npm", "run", "start"]

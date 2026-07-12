@@ -1,0 +1,18 @@
+{
+  "signed_at": "2026-05-31",
+  "phase": "gradual_enable_complete",
+  "gates": {
+    "G1_data_reconcile": { "passed": true, "quote_coverage_pct": 96.3 },
+    "G3_polars_indicators": { "passed": true, "checked": 54, "mismatches": 0 },
+    "G4_factor_merge": { "passed": true, "factor_history_days": 94 },
+    "G2_rust_backtest": { "passed": true, "mode": "python_compat_subprocess", "note": "qars2 not installed; worker uses python_compat" }
+  },
+  "flags_enabled": {
+    "AFR_USE_POLARS": true,
+    "AFR_FACTOR_MERGE_ENABLED": true,
+    "AFR_QLIB_ENABLED": true,
+    "AFR_QLIB_PREDICTIONS_APPROVED": true,
+    "AFR_RUST_BACKTEST_APPROVED": true,
+    "AFR_GRAY_RELEASE_PCT": 100
+  }
+}

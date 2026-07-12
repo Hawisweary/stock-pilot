@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "backtesting-trading-strategies": {
+      "source": "gracefullight/stock-checker",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/backtesting-trading-strategies/SKILL.md",
+      "computedHash": "965157971b1244ec7a8c724160f92f258f6db711a99b6b2724eb99ee629748bd"
+    },
+    "web-scraping": {
+      "source": "mindrally/skills",
+      "sourceType": "github",
+      "skillPath": "web-scraping/SKILL.md",
+      "computedHash": "01ffcaaf7f9ec8c4fdf0b26fdab5d5db5d39c0ee6727f693ce09c10a991a0bf0"
+    }
+  }
+}

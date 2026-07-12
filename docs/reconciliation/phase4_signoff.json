@@ -1,0 +1,159 @@
+{
+  "signed_at": "2026-05-31",
+  "phase": "IV_full_release",
+  "score_history": {
+    "trade_dates_processed": 90,
+    "inserted": 55,
+    "updated": 246,
+    "score_history_days": 8,
+    "factor_backfill_writes": 2889,
+    "target_days": 60
+  },
+  "merge": {
+    "success_count": 3,
+    "presets_run": 3
+  },
+  "ml_train": {
+    "status": "error",
+    "stderr": "/harrywang/WorkBuddy/2026-05-18-task-7/ai-fundamental-researcher/venv-quant/lib/python3.14/site-packages/lightgbm/lib/lib_lightgbm.dylib, 0x0006): Library not loaded: @rpath/libomp.dylib\n  Referenced from: <D44045CD-B874-3A27-9A61-F131D99AACE4> /Users/harrywang/WorkBuddy/2026-05-18-task-7/ai-fundamental-researcher/venv-quant/lib/python3.14/site-packages/lightgbm/lib/lib_lightgbm.dylib\n  Reason: tried: '/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/opt/local/lib/libomp/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/local/lib/libomp/libomp.dylib' (no such file), '/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/opt/local/lib/libomp/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/local/lib/libomp/libomp.dylib' (no such file)\n",
+    "stdout": ""
+  },
+  "ml_sync": {
+    "skipped": true
+  },
+  "db_snapshot": true,
+  "backtest_reconcile_ok": true,
+  "upgrade_metrics": {
+    "data_quality": {
+      "active_stocks": 54,
+      "industry_coverage_pct": 100.0,
+      "industry_coverage_threshold": 98.0,
+      "industry_coverage_ok": true,
+      "missing_industry_samples": [],
+      "interest_coverage_missing_pct": 0.0,
+      "interest_coverage_missing_threshold": 5.0,
+      "interest_coverage_ok": true,
+      "interest_coverage_column_present": true,
+      "interest_coverage_missing_samples": [],
+      "alerts": [],
+      "checked_at": "2026-05-31"
+    },
+    "migration": {
+      "score_history_days": 8,
+      "factor_history_days": 94,
+      "factor_history_target": 60,
+      "factor_history_progress_pct": 100.0,
+      "factor_values_rows": 33663,
+      "active_stocks": 54,
+      "jobs": {
+        "pending": 0,
+        "running": 0,
+        "done": 7,
+        "failed": 4,
+        "recent": [
+          {
+            "id": "ba178a61-462",
+            "job_type": "factor_compute",
+            "status": "done",
+            "created_at": "2026-05-31T03:04:34.805971",
+            "finished_at": "2026-05-31T03:04:35.303664",
+            "error": null
+          },
+          {
+            "id": "9472ed71-9a5",
+            "job_type": "factor_compute",
+            "status": "done",
+            "created_at": "2026-05-31T03:02:26.368769",
+            "finished_at": "2026-05-31T03:02:26.373317",
+            "error": null
+          },
+          {
+            "id": "e4a21132-981",
+            "job_type": "factor_compute",
+            "status": "done",
+            "created_at": "2026-05-31T02:57:42.858540",
+            "finished_at": "2026-05-31T02:57:42.861851",
+            "error": null
+          },
+          {
+            "id": "49d4a6f5-ea7",
+            "job_type": "factor_compute",
+            "status": "done",
+            "created_at": "2026-05-31T02:57:32.490231",
+            "finished_at": "2026-05-31T02:57:32.493710",
+            "error": null
+          },
+          {
+            "id": "34002649-045",
+            "job_type": "factor_compute",
+            "status": "done",
+            "created_at": "2026-05-31T02:45:32.052114",
+            "finished_at": "2026-05-31T02:45:32.055540",
+            "error": null
+          },
+          {
+            "id": "184540e3-9ac",
+            "job_type": "factor_compute",
+            "status": "done",
+            "created_at": "2026-05-31T01:52:07.908007",
+            "finished_at": "2026-05-31T01:52:07.911693",
+            "error": null
+          },
+          {
+            "id": "30118a70-7df",
+            "job_type": "factor_compute",
+            "status": "done",
+            "created_at": "2026-05-31T01:46:38.213095",
+            "finished_at": "2026-05-31T01:46:38.216795",
+            "error": null
+          },
+          {
+            "id": "fdd3e244-d85",
+            "job_type": "factor_compute",
+            "status": "failed",
+            "created_at": "2026-05-31T01:46:30.880161",
+            "finished_at": "2026-05-31T01:46:30.885259",
+            "error": "no such table: debate_v2"
+          },
+          {
+            "id": "3fefa2f6-08a",
+            "job_type": "factor_compute",
+            "status": "failed",
+            "created_at": "2026-05-31T01:46:26.369552",
+            "finished_at": "2026-05-31T01:46:26.374916",
+            "error": "no such table: debate_v2"
+          },
+          {
+            "id": "c457371e-cf9",
+            "job_type": "factor_compute",
+            "status": "failed",
+            "created_at": "2026-05-31T01:46:20.296423",
+            "finished_at": "2026-05-31T01:46:20.301218",
+            "error": "no such table: stock_daily_quotes"
+          }
+        ],
+        "in_memory": []
+      },
+      "pilot": {
+        "enabled": true,
+        "stock_count": 50,
+        "created_at": "2026-05-31",
+        "pilot_db": "/Users/harrywang/WorkBuddy/2026-05-18-task-7/ai-fundamental-researcher/data/afr_pilot.db"
+      },
+      "gates": {
+        "factor_merge_ready": true,
+        "ic_stable_ready": true
+      },
+      "checked_at": "2026-05-31"
+    },
+    "alerts": [],
+    "all_ok": true,
+    "checked_at": "2026-05-31"
+  },
+  "env": {
+    "gray_release_pct": 100,
+    "factor_merge": "true",
+    "rust_approved": "true",
+    "qlib_enabled": "true"
+  }
+}

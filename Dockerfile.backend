@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY backend/requirements.txt ./backend/
+RUN pip install --no-cache-dir -r backend/requirements.txt pytest
+COPY backend ./backend
+COPY tests ./tests
+ENV AFR_HOST=0.0.0.0
+ENV AFR_PORT=8800
+EXPOSE 8800
+CMD ["python", "backend/app.py"]

@@ -1,0 +1,101 @@
+{
+  "python": [
+    {
+      "id": "G1",
+      "params": {
+        "days": 90,
+        "top_n": 5,
+        "strategy": "composite",
+        "rebalance": "weekly",
+        "lookback": 20
+      },
+      "result": {
+        "total_return_pct": 1.97,
+        "max_drawdown_pct": 14.34,
+        "trade_count": 31,
+        "sharpe": 0.35,
+        "engine": "python",
+        "elapsed_ms": 319,
+        "rust_fallback": null
+      }
+    },
+    {
+      "id": "G2",
+      "params": {
+        "days": 180,
+        "top_n": 3,
+        "strategy": "val",
+        "rebalance": "monthly",
+        "lookback": 20
+      },
+      "result": {
+        "total_return_pct": 6.72,
+        "max_drawdown_pct": 11.74,
+        "trade_count": 15,
+        "sharpe": 0.67,
+        "engine": "python",
+        "elapsed_ms": 314,
+        "rust_fallback": null
+      }
+    },
+    {
+      "id": "G3",
+      "params": {
+        "days": 60,
+        "top_n": 5,
+        "strategy": "momentum",
+        "rebalance": "weekly",
+        "lookback": 20
+      },
+      "result": {
+        "total_return_pct": 8.67,
+        "max_drawdown_pct": 5.09,
+        "trade_count": 54,
+        "sharpe": 1.74,
+        "engine": "python",
+        "elapsed_ms": 309,
+        "rust_fallback": null
+      }
+    }
+  ],
+  "rust": [
+    {
+      "id": "G1",
+      "result": {
+        "total_return_pct": 1.97,
+        "max_drawdown_pct": 14.34,
+        "trade_count": 31,
+        "sharpe": 0.35,
+        "engine": "rust",
+        "elapsed_ms": 343,
+        "rust_fallback": null
+      }
+    },
+    {
+      "id": "G2",
+      "result": {
+        "total_return_pct": 6.72,
+        "max_drawdown_pct": 11.74,
+        "trade_count": 15,
+        "sharpe": 0.67,
+        "engine": "rust",
+        "elapsed_ms": 346,
+        "rust_fallback": null
+      }
+    },
+    {
+      "id": "G3",
+      "result": {
+        "total_return_pct": 8.67,
+        "max_drawdown_pct": 5.09,
+        "trade_count": 54,
+        "sharpe": 1.74,
+        "engine": "rust",
+        "elapsed_ms": 342,
+        "rust_fallback": null
+      }
+    }
+  ],
+  "comparisons": [],
+  "passed": true
+}

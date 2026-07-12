@@ -1,0 +1,35 @@
+{
+  "checked_at": "2026-05-31",
+  "db_path": "/Users/harrywang/WorkBuddy/2026-05-18-task-7/ai-fundamental-researcher/data/afr.db",
+  "latest_quote_date": "2026-05-29",
+  "latest_score_date": "2026-05-29",
+  "latest_trading_date": "2026-05-29",
+  "active_stocks": 54,
+  "quote_coverage_pct": 96.3,
+  "score_fresh_pct": 100.0,
+  "score_quote_align_pct": 100.0,
+  "missing_quote": [
+    "301313",
+    "002354"
+  ],
+  "stale_scores": [],
+  "misaligned": [],
+  "gates": {
+    "quote_coverage_pct": {
+      "threshold": 95.0,
+      "value": 96.3,
+      "passed": true
+    },
+    "score_fresh_pct": {
+      "threshold": 90.0,
+      "value": 100.0,
+      "passed": true
+    },
+    "score_quote_align_pct": {
+      "threshold": 98.0,
+      "value": 100.0,
+      "passed": true
+    }
+  },
+  "passed": true
+}

@@ -1,0 +1,4 @@
+[project]
+name = "ai-fundamental-researcher-backend"
+requires-python = ">=3.10"
+description = "AI Fundamental Researcher — FastAPI backend"

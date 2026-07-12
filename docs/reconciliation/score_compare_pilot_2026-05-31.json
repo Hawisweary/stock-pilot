@@ -1,0 +1,197 @@
+{
+  "report_date": "2026-05-31",
+  "db_path": "/Users/harrywang/WorkBuddy/2026-05-18-task-7/ai-fundamental-researcher/data/afr_pilot.db",
+  "pilot_only": true,
+  "factor_scores_date": "2026-05-29",
+  "comprehensive_scores_date": "2026-05-29",
+  "compared_count": 50,
+  "mean_diff": 0.0,
+  "mean_abs_diff": 0.02,
+  "large_diff_count": 0,
+  "large_diff_threshold": 30.0,
+  "rollback_warning": false,
+  "top_diff": [
+    {
+      "code": "603019",
+      "name": "中科曙光",
+      "industry_sw": "计算机",
+      "old_composite": 53.1,
+      "new_composite": 53.1,
+      "diff": -0.05,
+      "fundamental_8d": 53.1
+    },
+    {
+      "code": "300474",
+      "name": "景嘉微",
+      "industry_sw": "电子",
+      "old_composite": 43.4,
+      "new_composite": 43.4,
+      "diff": 0.04,
+      "fundamental_8d": 43.4
+    },
+    {
+      "code": "600703",
+      "name": "三安光电",
+      "industry_sw": "电子",
+      "old_composite": 47.5,
+      "new_composite": 47.5,
+      "diff": -0.04,
+      "fundamental_8d": 47.5
+    },
+    {
+      "code": "002472",
+      "name": "双环传动",
+      "industry_sw": "汽车",
+      "old_composite": 70.4,
+      "new_composite": 70.4,
+      "diff": 0.04,
+      "fundamental_8d": 70.4
+    },
+    {
+      "code": "300124",
+      "name": "汇川技术",
+      "industry_sw": "电力设备",
+      "old_composite": 60.0,
+      "new_composite": 60.0,
+      "diff": 0.04,
+      "fundamental_8d": 60.0
+    },
+    {
+      "code": "002527",
+      "name": "新时达",
+      "industry_sw": "机械设备",
+      "old_composite": 46.5,
+      "new_composite": 46.5,
+      "diff": -0.04,
+      "fundamental_8d": 46.5
+    },
+    {
+      "code": "603662",
+      "name": "柯力传感",
+      "industry_sw": "电力设备",
+      "old_composite": 59.7,
+      "new_composite": 59.7,
+      "diff": -0.04,
+      "fundamental_8d": 59.7
+    },
+    {
+      "code": "600391",
+      "name": "航发科技",
+      "industry_sw": "国防军工",
+      "old_composite": 43.2,
+      "new_composite": 43.2,
+      "diff": 0.04,
+      "fundamental_8d": 43.2
+    },
+    {
+      "code": "600879",
+      "name": "航天电子",
+      "industry_sw": "国防军工",
+      "old_composite": 38.6,
+      "new_composite": 38.6,
+      "diff": 0.04,
+      "fundamental_8d": 38.6
+    },
+    {
+      "code": "600580",
+      "name": "卧龙电驱",
+      "industry_sw": "电力设备",
+      "old_composite": 41.7,
+      "new_composite": 41.7,
+      "diff": -0.04,
+      "fundamental_8d": 41.7
+    },
+    {
+      "code": "300502",
+      "name": "新易盛",
+      "industry_sw": "通信",
+      "old_composite": 86.5,
+      "new_composite": 86.5,
+      "diff": -0.04,
+      "fundamental_8d": 86.5
+    },
+    {
+      "code": "002463",
+      "name": "沪电股份",
+      "industry_sw": "电子",
+      "old_composite": 66.2,
+      "new_composite": 66.2,
+      "diff": 0.04,
+      "fundamental_8d": 66.2
+    },
+    {
+      "code": "301005",
+      "name": "超捷股份",
+      "industry_sw": "汽车",
+      "old_composite": 59.3,
+      "new_composite": 59.3,
+      "diff": -0.04,
+      "fundamental_8d": 59.3
+    },
+    {
+      "code": "000725",
+      "name": "京东方Ａ",
+      "industry_sw": "电子",
+      "old_composite": 57.4,
+      "new_composite": 57.4,
+      "diff": -0.04,
+      "fundamental_8d": 57.4
+    },
+    {
+      "code": "300394",
+      "name": "天孚通信",
+      "industry_sw": "通信",
+      "old_composite": 75.0,
+      "new_composite": 75.0,
+      "diff": -0.04,
+      "fundamental_8d": 75.0
+    },
+    {
+      "code": "688322",
+      "name": "奥比中光-W",
+      "industry_sw": "电子",
+      "old_composite": 67.4,
+      "new_composite": 67.4,
+      "diff": 0.04,
+      "fundamental_8d": 67.4
+    },
+    {
+      "code": "002625",
+      "name": "光启技术",
+      "industry_sw": "国防军工",
+      "old_composite": 74.2,
+      "new_composite": 74.2,
+      "diff": 0.03,
+      "fundamental_8d": 74.2
+    },
+    {
+      "code": "002747",
+      "name": "埃斯顿",
+      "industry_sw": "机械设备",
+      "old_composite": 46.5,
+      "new_composite": 46.5,
+      "diff": 0.03,
+      "fundamental_8d": 46.5
+    },
+    {
+      "code": "002792",
+      "name": "通宇通讯",
+      "industry_sw": "通信",
+      "old_composite": 41.0,
+      "new_composite": 41.0,
+      "diff": 0.03,
+      "fundamental_8d": 41.0
+    },
+    {
+      "code": "603601",
+      "name": "再升科技",
+      "industry_sw": "基础化工",
+      "old_composite": 27.8,
+      "new_composite": 27.8,
+      "diff": -0.03,
+      "fundamental_8d": 27.8
+    }
+  ],
+  "large_diff_samples": [],
+  "summary": "对比 50 只；均值差 0.0；|diff|>30.0 共 0 只"
+}

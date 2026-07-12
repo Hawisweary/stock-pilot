@@ -1,0 +1,57 @@
+# 环境变量（含API密钥，绝对不能提交）
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pids/
+
+# SQLite 数据库与数据目录（1.4GB DB + 5GB 备份）
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# 虚拟环境
+venv-quant/
+venv/
+
+# Tauri 构建产物
+src-tauri/target/
+
+# Node.js
+node_modules/
+.next/
+out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 临时文件
+*.log
+/tmp/
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+.next/
+.env
+*.db
+logs/
+.DS_Store
+dist/
+build/
+*.egg-info/
+
+# 第三方参考源码(可重新下载,含内嵌git仓库)
+third_party/

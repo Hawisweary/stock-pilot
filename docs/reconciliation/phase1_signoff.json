@@ -1,0 +1,35 @@
+{
+  "signed_at": "2026-05-31",
+  "phase": "risk_plan_item_3_and_2",
+  "item_3_upgrade_monitor": {
+    "delivered": [
+      "services/upgrade_monitor.py",
+      "GET /api/system/upgrade-metrics",
+      "GET /api/system/migration-progress",
+      "beta_health data_quality + migration fields"
+    ],
+    "thresholds": {
+      "industry_coverage_min_pct": 98,
+      "interest_coverage_missing_max_pct": 5,
+      "factor_history_target_days": 60
+    }
+  },
+  "item_2_pilot_phase1": {
+    "delivered": [
+      "scripts/pilot_setup.py",
+      "scripts/score_compare_report.py",
+      "services/score_compare.py",
+      "GET /api/system/pilot/summary",
+      "GET /api/system/pilot/score-compare"
+    ],
+    "pilot_stock_count": 50,
+    "pilot_industries": 14,
+    "score_compare_pilot": {
+      "compared_count": 50,
+      "mean_abs_diff": 0.02,
+      "large_diff_count": 0,
+      "rollback_warning": false
+    }
+  },
+  "tests": "31 passed"
+}

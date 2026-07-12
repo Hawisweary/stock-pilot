@@ -1,0 +1,158 @@
+{
+  "phase": "III_factor_merge",
+  "ic_review": {
+    "factors": [
+      {
+        "factor_id": "F010",
+        "n_periods": 60,
+        "mean_ic": -0.1498,
+        "ir": -0.63,
+        "ic_positive_ratio": 0.32,
+        "stable": true,
+        "error": null
+      },
+      {
+        "factor_id": "F011",
+        "n_periods": 60,
+        "mean_ic": 0.029,
+        "ir": 0.21,
+        "ic_positive_ratio": 0.65,
+        "stable": true,
+        "error": null
+      },
+      {
+        "factor_id": "F012",
+        "n_periods": 60,
+        "mean_ic": 0.07,
+        "ir": 0.45,
+        "ic_positive_ratio": 0.72,
+        "stable": true,
+        "error": null
+      },
+      {
+        "factor_id": "F013",
+        "n_periods": 60,
+        "mean_ic": 0.0527,
+        "ir": 0.36,
+        "ic_positive_ratio": 0.65,
+        "stable": true,
+        "error": null
+      }
+    ],
+    "stable_count": 4,
+    "min_stable_required": 2,
+    "ic_stable_ready": true,
+    "forward_days": 20,
+    "max_dates": 60
+  },
+  "merge": {
+    "ic_review": {
+      "factors": [
+        {
+          "factor_id": "F010",
+          "n_periods": 60,
+          "mean_ic": -0.1498,
+          "ir": -0.63,
+          "ic_positive_ratio": 0.32,
+          "stable": true,
+          "error": null
+        },
+        {
+          "factor_id": "F011",
+          "n_periods": 60,
+          "mean_ic": 0.029,
+          "ir": 0.21,
+          "ic_positive_ratio": 0.65,
+          "stable": true,
+          "error": null
+        },
+        {
+          "factor_id": "F012",
+          "n_periods": 60,
+          "mean_ic": 0.07,
+          "ir": 0.45,
+          "ic_positive_ratio": 0.72,
+          "stable": true,
+          "error": null
+        },
+        {
+          "factor_id": "F013",
+          "n_periods": 60,
+          "mean_ic": 0.0527,
+          "ir": 0.36,
+          "ic_positive_ratio": 0.65,
+          "stable": true,
+          "error": null
+        }
+      ],
+      "stable_count": 4,
+      "min_stable_required": 2,
+      "ic_stable_ready": true,
+      "forward_days": 20,
+      "max_dates": 60
+    },
+    "presets_run": 2,
+    "success_count": 2,
+    "results": [
+      {
+        "preset": "tech_equal",
+        "factor_id": "F016",
+        "name": "tech_multi_equal",
+        "method": "equal",
+        "merged_count": 54,
+        "meta": {
+          "method": "equal",
+          "inputs": [
+            "F010",
+            "F011",
+            "F012",
+            "F013"
+          ],
+          "date": "2026-05-31",
+          "created": "2026-05-31"
+        }
+      },
+      {
+        "preset": "tech_ic_ir",
+        "factor_id": "F017",
+        "name": "tech_multi_ic_ir",
+        "method": "ic_ir",
+        "weights": {
+          "F010": 0.5972222222222222,
+          "F011": 0.25,
+          "F012": 0.11111111111111112,
+          "F013": 0.041666666666666664
+        },
+        "merged_count": 54,
+        "meta": {
+          "method": "ic_ir",
+          "inputs": [
+            "F010",
+            "F011",
+            "F012",
+            "F013"
+          ],
+          "weights": {
+            "F010": 0.5972222222222222,
+            "F011": 0.25,
+            "F012": 0.11111111111111112,
+            "F013": 0.041666666666666664
+          },
+          "date": "2026-05-31"
+        }
+      }
+    ]
+  },
+  "upgrade_metrics": {
+    "all_ok": true,
+    "factor_merge_ready": true,
+    "ic_stable_ready": true,
+    "factor_history_days": 94
+  },
+  "signed_at": "2026-05-31",
+  "next_steps": [
+    "Install libomp (brew install libomp) for native LightGBM",
+    "Install pyqlib in venv-quant when Python 3.11 available",
+    "Install qars2 for native Rust backtest (currently python_compat)"
+  ]
+}

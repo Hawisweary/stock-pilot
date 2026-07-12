@@ -1,0 +1,573 @@
+{
+  "health": {
+    "status": "ok",
+    "db_initialized": true,
+    "_elapsed_ms": 11
+  },
+  "migration": {
+    "schema_version": 20,
+    "db": "/Users/harrywang/WorkBuddy/2026-05-18-task-7/ai-fundamental-researcher/data/afr.db"
+  },
+  "factor_full": {
+    "date": "2026-06-01",
+    "factors_computed": 4165,
+    "backfill": true,
+    "s0_setup": {
+      "adj_close": {
+        "adj_close_filled": 0
+      },
+      "lifecycle": {
+        "upserted": 63
+      },
+      "financial_calendar": {
+        "rows": 4625
+      },
+      "wide_migration": {
+        "skipped": true
+      }
+    },
+    "wide_rows": 5102,
+    "meta": {
+      "data_as_of": "2026-05-31",
+      "universe_size": 54,
+      "score_history_days": 9,
+      "factor_history_days": 95,
+      "warnings": [
+        "评分历史仅9天，回测/IC 不稳定"
+      ]
+    },
+    "_elapsed_ms": 2266
+  },
+  "factor_incremental": {
+    "mode": "incremental",
+    "target_date": "2026-05-29",
+    "stocks_touched": 52,
+    "cells_written": 782,
+    "wide_cells_synced": 1976,
+    "duration_ms": 160,
+    "comprehensive_date": "2026-05-31",
+    "meta": {
+      "data_as_of": "2026-05-31",
+      "universe_size": 54,
+      "score_history_days": 9,
+      "factor_history_days": 95,
+      "warnings": [
+        "评分历史仅9天，回测/IC 不稳定"
+      ]
+    },
+    "_elapsed_ms": 619
+  },
+  "batch_dry": {
+    "dry_run": true,
+    "mode": "compute_and_sync",
+    "target_date": "2026-05-29",
+    "active_stocks_count": 54,
+    "sync_rate_all_before": 1.0,
+    "sync_rate_required_before": 1.0,
+    "missing_total": 0,
+    "planned_actions": [
+      {
+        "priority": 0,
+        "action": "sync_all_dimensions",
+        "affected_stocks": 54,
+        "estimated_ms": 300,
+        "estimated_ms_range": [
+          240,
+          390
+        ]
+      }
+    ],
+    "total_estimated_ms_range": [
+      240,
+      390
+    ],
+    "would_skip": [
+      {
+        "action": "fundamental_score",
+        "reason": "no_gaps"
+      },
+      {
+        "action": "capital_score",
+        "reason": "no_gaps"
+      },
+      {
+        "action": "mood_score",
+        "reason": "no_gaps"
+      },
+      {
+        "action": "policy_score",
+        "reason": "no_gaps"
+      },
+      {
+        "action": "val_score",
+        "reason": "no_gaps"
+      },
+      {
+        "action": "sentiment_score",
+        "reason": "no_gaps"
+      },
+      {
+        "action": "technical_score",
+        "reason": "no_gaps"
+      }
+    ],
+    "prefetch_probe": {
+      "attempted": 0,
+      "would_fetch": 0
+    },
+    "prefetch_by_dimension": {},
+    "gap_targets": {},
+    "_elapsed_ms": 21
+  },
+  "batch_sync": {
+    "enqueue": {
+      "job_id": "bf-20260529-41ec",
+      "status": "queued",
+      "mode": "sync_only",
+      "estimated_gaps": 0,
+      "poll_url": "/api/system/jobs/bf-20260529-41ec",
+      "_elapsed_ms": 17
+    },
+    "poll": {
+      "id": "bf-20260529-41ec",
+      "type": "batch_score_fill",
+      "status": "done",
+      "result": {
+        "mode": "sync_only",
+        "job_id": "bf-20260529-41ec",
+        "target_date": "2026-05-29",
+        "before": {
+          "target_date": "2026-05-29",
+          "active_stocks_count": 54,
+          "sync_rate_all": 1.0,
+          "sync_rate_required": 1.0,
+          "summary": {
+            "fundamental_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "technical_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "sentiment_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "capital_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "policy_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "mood_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "val_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            }
+          },
+          "gaps": [],
+          "missing_total": 0,
+          "stale_total": 0,
+          "gap_stale_days": 1,
+          "recommended_actions": []
+        },
+        "after": {
+          "target_date": "2026-05-29",
+          "active_stocks_count": 54,
+          "sync_rate_all": 1.0,
+          "sync_rate_required": 1.0,
+          "summary": {
+            "fundamental_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "technical_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "sentiment_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "capital_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "policy_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "mood_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            },
+            "val_score": {
+              "ok": 54,
+              "missing": 0,
+              "no_source": 0,
+              "stale": 0
+            }
+          },
+          "gaps": [],
+          "missing_total": 0,
+          "stale_total": 0,
+          "gap_stale_days": 1,
+          "recommended_actions": []
+        },
+        "actions": {
+          "sync": {
+            "calc_date": "2026-05-29",
+            "synced": {
+              "fundamental_score": 0,
+              "technical_score": 0,
+              "sentiment_score": 0,
+              "capital_score": 0,
+              "policy_score": 0,
+              "mood_score": 0,
+              "val_score": 0
+            },
+            "skipped": {
+              "fundamental_score": 0,
+              "technical_score": 0,
+              "sentiment_score": 0,
+              "capital_score": 0,
+              "policy_score": 0,
+              "mood_score": 0,
+              "val_score": 0
+            },
+            "unchanged": {
+              "fundamental_score": 54,
+              "technical_score": 54,
+              "sentiment_score": 54,
+              "capital_score": 54,
+              "policy_score": 54,
+              "mood_score": 54,
+              "val_score": 54
+            },
+            "refreshed_stale": {
+              "fundamental_score": 0,
+              "technical_score": 0,
+              "sentiment_score": 0,
+              "capital_score": 0,
+              "policy_score": 0,
+              "mood_score": 0,
+              "val_score": 0
+            },
+            "affected_stocks": 0,
+            "status": "done"
+          }
+        },
+        "errors": [],
+        "duration_ms": 46,
+        "status": "done"
+      },
+      "error": null,
+      "created_at": "2026-06-01T02:20:55.571014",
+      "started_at": "2026-06-01T02:20:55.571644",
+      "finished_at": "2026-06-01T02:20:55.621578",
+      "heartbeat_at": "2026-06-01T02:20:55.573011",
+      "poll_url": "/api/system/jobs/bf-20260529-41ec",
+      "_elapsed_ms": 4
+    },
+    "mode": "sync_only",
+    "job_id": "bf-20260529-41ec",
+    "target_date": "2026-05-29",
+    "before": {
+      "target_date": "2026-05-29",
+      "active_stocks_count": 54,
+      "sync_rate_all": 1.0,
+      "sync_rate_required": 1.0,
+      "summary": {
+        "fundamental_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "technical_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "sentiment_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "capital_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "policy_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "mood_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "val_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        }
+      },
+      "gaps": [],
+      "missing_total": 0,
+      "stale_total": 0,
+      "gap_stale_days": 1,
+      "recommended_actions": []
+    },
+    "after": {
+      "target_date": "2026-05-29",
+      "active_stocks_count": 54,
+      "sync_rate_all": 1.0,
+      "sync_rate_required": 1.0,
+      "summary": {
+        "fundamental_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "technical_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "sentiment_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "capital_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "policy_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "mood_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        },
+        "val_score": {
+          "ok": 54,
+          "missing": 0,
+          "no_source": 0,
+          "stale": 0
+        }
+      },
+      "gaps": [],
+      "missing_total": 0,
+      "stale_total": 0,
+      "gap_stale_days": 1,
+      "recommended_actions": []
+    },
+    "actions": {
+      "sync": {
+        "calc_date": "2026-05-29",
+        "synced": {
+          "fundamental_score": 0,
+          "technical_score": 0,
+          "sentiment_score": 0,
+          "capital_score": 0,
+          "policy_score": 0,
+          "mood_score": 0,
+          "val_score": 0
+        },
+        "skipped": {
+          "fundamental_score": 0,
+          "technical_score": 0,
+          "sentiment_score": 0,
+          "capital_score": 0,
+          "policy_score": 0,
+          "mood_score": 0,
+          "val_score": 0
+        },
+        "unchanged": {
+          "fundamental_score": 54,
+          "technical_score": 54,
+          "sentiment_score": 54,
+          "capital_score": 54,
+          "policy_score": 54,
+          "mood_score": 54,
+          "val_score": 54
+        },
+        "refreshed_stale": {
+          "fundamental_score": 0,
+          "technical_score": 0,
+          "sentiment_score": 0,
+          "capital_score": 0,
+          "policy_score": 0,
+          "mood_score": 0,
+          "val_score": 0
+        },
+        "affected_stocks": 0,
+        "status": "done"
+      }
+    },
+    "errors": [],
+    "duration_ms": 46,
+    "status": "done"
+  },
+  "expr_validate": {
+    "valid": true,
+    "kind": "timeseries",
+    "formula": "Mean($adj_close, 20) / Std($adj_close, 20)",
+    "_elapsed_ms": 2
+  },
+  "gp": {
+    "run_id": 1,
+    "evaluated": 5,
+    "winners": [
+      {
+        "factor_id": "F025",
+        "formula": "Std($adj_close, 5) / Mean($adj_close, 5)",
+        "mean_ic": -999.0,
+        "computed": 54
+      },
+      {
+        "factor_id": "F026",
+        "formula": "Mean($adj_close, 10) - Mean($adj_close, 5)",
+        "mean_ic": -999.0,
+        "computed": 54
+      }
+    ],
+    "forward_days": 20,
+    "meta": {
+      "data_as_of": "2026-05-31",
+      "universe_size": 54,
+      "score_history_days": 9,
+      "factor_history_days": 95,
+      "warnings": [
+        "评分历史仅9天，回测/IC 不稳定"
+      ]
+    },
+    "_elapsed_ms": 1091
+  },
+  "debate_history": {
+    "history": [
+      {
+        "id": 8,
+        "event_type": "done",
+        "job_id": null,
+        "mode": "full",
+        "calc_date": "2026-05-29",
+        "target_date": "2026-05-31",
+        "total": 12,
+        "to_run": 12,
+        "llm_count": 12,
+        "light_count": 0,
+        "skipped": 0,
+        "completed": 12,
+        "error_count": 0,
+        "batch_retry_passes": 0,
+        "concurrency": 4,
+        "tier_counts_json": "{\"full_llm\": 12}",
+        "skip_reasons_json": null,
+        "duration_ms": 24266,
+        "triggered_by": "two_phase_benchmark",
+        "detail_json": "{\"batch_retry_passes\": 0, \"error_samples\": []}",
+        "created_at": "2026-05-31 13:43:27"
+      },
+      {
+        "id": 6,
+        "event_type": "done",
+        "job_id": null,
+        "mode": "full",
+        "calc_date": "2026-05-29",
+        "target_date": "2026-05-31",
+        "total": 12,
+        "to_run": 12,
+        "llm_count": 12,
+        "light_count": 0,
+        "skipped": 0,
+        "completed": 12,
+        "error_count": 0,
+        "batch_retry_passes": 1,
+        "concurrency": 4,
+        "tier_counts_json": "{\"full_llm\": 12}",
+        "skip_reasons_json": null,
+        "duration_ms": 31797,
+        "triggered_by": "two_phase_benchmark",
+        "detail_json": "{\"batch_retry_passes\": 1, \"error_samples\": []}",
+        "created_at": "2026-05-31 13:43:03"
+      },
+      {
+        "id": 7,
+        "event_type": "start",
+        "job_id": null,
+        "mode": "full",
+        "calc_date": "2026-05-29",
+        "target_date": "2026-05-31",
+        "total": 12,
+        "to_run": 12,
+        "llm_count": 12,
+        "light_count": 0,
+        "skipped": 0,
+        "completed": null,
+        "error_count": null,
+        "batch_retry_passes": 0,
+        "concurrency": 4,
+        "tier_counts_json": "{\"full_llm\": 12}",
+        "skip_reasons_json": "{}",
+        "duration_ms": null,
+        "triggered_by": "two_phase_benchmark",
+        "detail_json": null,
+        "created_at": "2026-05-31 13:43:03"
+      }
+    ],
+    "_elapsed_ms": 4
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "signed_at": "2026-05-31",
+  "phase": "II_gray_release",
+  "delivered": [
+    "services/gray_release.py",
+    "services/financial_backfill.py",
+    "services/factor_history_expand.py",
+    "scripts/phase2_backfill.py",
+    "GET /api/system/gray-status",
+    "POST /api/system/backfill/interest-coverage",
+    "POST /api/system/backfill/factor-history",
+    "GET /api/scores/ranking?dual=true&client_key=",
+    "scheduler: factor expand + interest backfill after daily compute",
+    "frontend: dual score banner + 五因子差 column on dashboard"
+  ],
+  "env_flags": {
+    "AFR_GRAY_RELEASE_PCT": 20,
+    "AFR_DUAL_SCORE_UI": true,
+    "AFR_FACTOR_MERGE_ENABLED": false
+  },
+  "backfill_results": {
+    "interest_coverage": {
+      "updated": 54,
+      "coverage_pct": 100.0
+    },
+    "factor_history": {
+      "factor_history_days": 93,
+      "merge_ready": true,
+      "technical_writes": 29136
+    }
+  },
+  "migration_gates": {
+    "factor_merge_ready": true,
+    "factor_history_days": 93,
+    "factor_history_target": 60
+  },
+  "gray_release": {
+    "pct": 20,
+    "dual_score_ui": true,
+    "default_client_in_gray": false,
+    "default_client_bucket": 75
+  },
+  "tests": "35 passed (test_phase2_modules + beta + upgrade_monitor + golden_backtest)",
+  "next_steps": [
+    "Enable AFR_FACTOR_MERGE_ENABLED=true after manual IC review",
+    "Phase III: expand gray to 50% if no score_diff anomalies",
+    "Install qars2 for Rust backtest pilot when ready"
+  ]
+}

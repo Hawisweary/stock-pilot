@@ -1,0 +1,540 @@
+"use client";
+
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { StockCard } from "@/components/StockCard";
+import { MarketIndexCard } from "@/components/MarketIndexCard";
+import { ThsHotspotsCard } from "@/components/ThsHotspotsCard";
+import { MacroIndicatorsPanel } from "@/components/MacroIndicatorsPanel";
+import { SectorRotationCard } from "@/components/SectorRotationCard";
+import { MarketOpsButtons } from "@/components/MarketOpsButtons";
+import { api, DashboardOverview, clearCache, pollFetchUntilDone, V5_RECALC_EVENT, getV5RecalcTimestamp, postSparkline, SparklineSeries } from "@/lib/api"
+import { ScoreSparkline } from "@/components/ScoreSparkline";
+import { DataHealthCard } from "@/components/DataHealthCard";
+import { ScoreAlertCard } from "@/components/ScoreAlertCard";
+import { UpcomingEarningsCard } from "@/components/UpcomingEarningsCard";
+import { PortfolioPnlCard } from "@/components/PortfolioPnlCard";
+import { exportCsv } from "@/lib/csvExport";
+import { scoreTextClass } from "@/lib/scoreColors";
+import { useToast } from "@/lib/useToast";
+import { RefreshCw } from "lucide-react";
+
+export default function DashboardPage() {
+  const toast = useToast();
+  const router = useRouter();
+  const [overview, setOverview] = useState<DashboardOverview | null>(null);
+  const [quality, setQuality] = useState<any>(null);
+  const [macro, setMacro] = useState<any>(null);
+  const [review, setReview] = useState<any>(null);
+  const [hotspots, setHotspots] = useState<any>(null);
+  const [thsHot, setThsHot] = useState<any>(null);
+  const [mlTop, setMlTop] = useState<{ code: string; name: string; score: number; model_version?: string }[]>([]);
+  const [v5Rank, setV5Rank] = useState<import("@/lib/api").V5ScoreRow[]>([]);
+  const [v5CalcDate, setV5CalcDate] = useState<string | null>(null);
+  const [sparklines, setSparklines] = useState<SparklineSeries>({});
+  const lastV5TsRef = useRef(0);
+  const [rankSortKey, setRankSortKey] = useState("score");
+  const [rankSortDir, setRankSortDir] = useState<"asc" | "desc">("desc");
+  const [loading, setLoading] = useState(true);
+  const [macroKey, setMacroKey] = useState(0);
+
+  // 排序后的排名数据
+  const sortedRank = [...v5Rank].sort((a, b) => {
+    const va = (a as unknown as Record<string, unknown>)[rankSortKey] ?? 0;
+    const vb = (b as unknown as Record<string, unknown>)[rankSortKey] ?? 0;
+    return rankSortDir === "desc" ? Number(vb) - Number(va) : Number(va) - Number(vb);
+  });
+  const avgV5 =
+    v5Rank.length > 0
+      ? v5Rank.reduce((s, r) => s + (r.score ?? r.composite_v5 ?? 0), 0) / v5Rank.length
+      : null;
+
+  const handleRankSort = (key: string) => {
+    if (rankSortKey === key) {
+      setRankSortDir(d => d === "desc" ? "asc" : "desc");
+    } else {
+      setRankSortKey(key);
+      setRankSortDir("desc");
+    }
+  };
+
+  const sortArrow = (key: string) => rankSortKey === key ? (rankSortDir === "desc" ? " ↓" : " ↑") : "";
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState("");
+  const pollAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      pollAbortRef.current?.abort();
+    };
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [data, mlRes, v5Batch, qRes, mRes, revRes, hotRes, thsRes] = await Promise.all([
+        api.dashboardOverview(),
+        api.mlTop(8),
+        api.getV5ScoresBatch({ market: "A" }),
+        fetch("/api/fusion/quality").then(r => r.json()),
+        fetch("/api/macro/score").then(r => r.json()),
+        fetch("/api/review/latest").then(r => r.json()),
+        fetch("/api/hotspots").then(r => r.json()),
+        fetch("/api/signals/hotspots").then(r => r.json()),
+      ]);
+      setOverview(data);
+      setMlTop(mlRes.enabled ? (mlRes.predictions || []) : []);
+      setQuality(qRes);
+      setMacro(mRes);
+      setReview(revRes?.review || null);
+      setHotspots(hotRes);
+      setThsHot(thsRes?.hotspots || []);
+      const scores = v5Batch.scores || [];
+      setV5Rank(scores);
+      setV5CalcDate(v5Batch.calc_date ?? null);
+      lastV5TsRef.current = getV5RecalcTimestamp();
+      // U1-3: 1次 bulk XHR 拉取 sparkline（禁止 N+1）
+      if (scores.length > 0) {
+        postSparkline(scores.map((s) => s.stock_id), 30)
+          .then(setSparklines)
+          .catch(() => {});
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadData();
+    const onV5 = () => loadData();
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const ts = getV5RecalcTimestamp();
+      if (ts > lastV5TsRef.current) loadData();
+    };
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel(V5_RECALC_EVENT);
+      channel.onmessage = () => loadData();
+    } catch {
+      /* ignore */
+    }
+    window.addEventListener(V5_RECALC_EVENT, onV5);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener(V5_RECALC_EVENT, onV5);
+      document.removeEventListener("visibilitychange", onVisible);
+      channel?.close();
+    };
+  }, [loadData]);
+
+  const handleRefreshAll = async () => {
+    pollAbortRef.current?.abort();
+    const ac = new AbortController();
+    pollAbortRef.current = ac;
+
+    setRefreshing(true);
+    setRefreshMsg("正在同步 V5 数据与评分...");
+    try {
+      await fetch("/api/v5/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "daily" }),
+      });
+      clearCache();
+
+      setRefreshMsg("正在后台增量抓取股票数据...");
+      const data = await api.fetchAll("incremental");
+      if (data.warning) {
+        toast.info(data.warning);
+      }
+      if (data.status === "already_running") {
+        setRefreshMsg(`抓取进行中 ${data.progress || ""}`);
+      } else if (data.count === 0) {
+        setRefreshMsg("");
+        setRefreshing(false);
+        toast.error(data.message || "没有跟踪的股票");
+        return;
+      }
+
+      await pollFetchUntilDone(
+        (p) => setRefreshMsg(`增量抓取 ${p}`),
+        2000,
+        ac.signal
+      );
+      setRefreshMsg("数据更新完成（如需最新 V5 评分请到数据页重算）");
+      await loadData();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (e instanceof DOMException && e.name === "AbortError") {
+        return;
+      }
+      toast.error("刷新失败: " + msg);
+      setRefreshMsg("刷新失败: " + msg);
+    } finally {
+      setRefreshing(false);
+      pollAbortRef.current = null;
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-6 animate-pulse">
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <div className="grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-24 bg-muted rounded-lg" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!overview) return <div>加载失败</div>;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <Badge variant={overview.stale_stocks > 0 ? "destructive" : "outline"} className="text-xs">
+            {overview.stale_stocks > 0
+              ? `⚠ ${overview.stale_stocks}只数据逾期`
+              : "数据正常"}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            最后更新: {overview.last_update || "暂无"}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRefreshAll}
+            disabled={refreshing}
+            className="gap-1"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+            {refreshing ? "刷新中..." : "一键刷新"}
+          </Button>
+        </div>
+      </div>
+
+      {/* 顶部状态栏：市场环境 / 宏观 / 预警数 */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className={`rounded-lg border px-4 py-3 flex items-center gap-3 ${macro?.score >= 60 ? 'border-green-200 bg-green-50' : macro?.score < 40 ? 'border-red-200 bg-red-50' : 'border-yellow-200 bg-yellow-50'}`}>
+          <div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">宏观环境</div>
+            <div className={`text-xl font-bold ${macro?.score >= 60 ? 'text-green-700' : macro?.score < 40 ? 'text-red-700' : 'text-yellow-700'}`}>
+              {macro ? `${macro.score}分` : "—"}
+            </div>
+            <div className="text-xs text-muted-foreground">{macro?.label ?? ""}</div>
+          </div>
+        </div>
+        <div className="rounded-lg border px-4 py-3">
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wide">V5 均分</div>
+          <div className={`text-xl font-bold ${avgV5 != null && avgV5 >= 60 ? 'text-green-700' : avgV5 != null && avgV5 < 40 ? 'text-red-700' : 'text-yellow-700'}`}>
+            {avgV5 != null ? avgV5.toFixed(1) : "—"}
+          </div>
+          <div className="text-xs text-muted-foreground">{v5Rank.length} 只股票</div>
+        </div>
+        <div className={`rounded-lg border px-4 py-3 ${overview.stale_stocks > 0 ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50'}`}>
+          <div className="text-[10px] text-muted-foreground uppercase tracking-wide">数据状态</div>
+          <div className={`text-xl font-bold ${overview.stale_stocks > 0 ? 'text-amber-700' : 'text-green-700'}`}>
+            {overview.stale_stocks > 0 ? `${overview.stale_stocks} 逾期` : "正常"}
+          </div>
+          <div className="text-xs text-muted-foreground">{overview.active_stocks}/{overview.stock_count} 活跃</div>
+        </div>
+      </div>
+
+      {/* 预警 + 财报日历 + 持仓盈亏 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <ScoreAlertCard />
+        <UpcomingEarningsCard />
+        <PortfolioPnlCard />
+      </div>
+
+      {/* U2-3: 数据健康看板 */}
+      <DataHealthCard
+        staleCount={overview.stale_stocks ?? 0}
+        staleList={overview.stale_stock_list ?? []}
+        dataQuality={overview.data_quality}
+        onRefreshed={loadData}
+      />
+      {/* 刷新进度 */}
+      {refreshMsg && (
+        <div className={`rounded-lg p-3 flex items-center gap-2 text-sm ${
+          refreshMsg.includes("完成") ? "bg-green-50 border border-green-200 text-green-800" :
+          refreshMsg.includes("失败") || refreshMsg.includes("超时") ? "bg-red-50 border border-red-200 text-red-800" :
+          "bg-blue-50 border border-blue-200 text-blue-800"
+        }`}>
+          <RefreshCw className={`h-4 w-4 ${refreshMsg.includes("完成") || refreshMsg.includes("失败") ? "" : "animate-spin"}`} />
+          <span className="flex-1">{refreshMsg}</span>
+          <button onClick={() => setRefreshMsg("")} className="text-current opacity-50 hover:opacity-100 ml-2 text-lg leading-none">&times;</button>
+        </div>
+      )}
+
+      {/* 大盘指数（技术面评分参考环境） */}
+      <MarketIndexCard compact />
+
+      {mlTop.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardTitle className="text-base">🤖 ML 预测 Top {mlTop.length}</CardTitle>
+            <button onClick={() => router.push("/qlib")} className="text-xs text-primary hover:underline">详情 →</button>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            {mlTop.map((p) => (
+              <div key={p.code} className="border rounded p-2">
+                <div className="font-mono">{p.code}</div>
+                <div className="truncate">{p.name}</div>
+                <div className="font-bold text-purple-600">{p.score?.toFixed?.(1) ?? p.score}</div>
+                <div className="text-muted-foreground">{p.model_version || "ml"}</div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 数据质量 + 宏观 */}
+      <div className="grid grid-cols-2 gap-4">
+        {quality && (
+          <Card><CardContent className="p-4">
+            <div className="text-xs text-muted-foreground mb-1">数据质量</div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="w-2 h-2 rounded-full bg-green-500" />{quality.summary?.green||0}
+              <span className="w-2 h-2 rounded-full bg-yellow-500 ml-2" />{quality.summary?.yellow||0}
+              <span className="w-2 h-2 rounded-full bg-red-500 ml-2" />{quality.summary?.red||0}
+              <span className="text-xs text-muted-foreground ml-2">/ {quality.summary?.total||0}</span>
+            </div>
+          </CardContent></Card>
+        )}
+        {macro && (
+          <Card><CardContent className="p-4">
+            <div className="text-xs text-muted-foreground mb-1">宏观环境</div>
+            <div className="flex items-center gap-2">
+              <span className={`text-lg font-bold ${macro.score>=60?'text-green-600':macro.score<40?'text-red-600':'text-yellow-600'}`}>{macro.score}分</span>
+              <span className="text-xs">{macro.label}</span>
+            </div>
+            {macro.indicators && (
+              <div className="flex gap-3 mt-1 text-[10px] text-muted-foreground">
+                {macro.indicators.pmi_manufacturing && <span>PMI:{macro.indicators.pmi_manufacturing}</span>}
+                {macro.indicators.cpi_yoy && <span>CPI:{macro.indicators.cpi_yoy}%</span>}
+                {macro.indicators.lpr_1y && <span>LPR:{macro.indicators.lpr_1y}%</span>}
+              </div>
+            )}
+          </CardContent></Card>
+        )}
+      </div>
+
+      {/* 每日综述 */}
+      <div className="space-y-2">
+        <MarketOpsButtons
+          ops={["review", "ths", "macro"]}
+          onMacroSynced={() => {
+            setMacroKey((k) => k + 1);
+            fetch("/api/macro/score").then((r) => r.json()).then(setMacro).catch(() => {});
+          }}
+        />
+        {review && (
+          <Card><CardContent className="p-4">
+            <div className="text-xs font-medium text-muted-foreground mb-2">📝 每日综述</div>
+            <div className="text-xs space-y-1">
+              <div>{review.review}</div>
+              <div className="text-blue-600">{review.focus}</div>
+              <div className="text-red-600">{review.risks}</div>
+            </div>
+          </CardContent></Card>
+        )}
+      </div>
+
+      {/* 同花顺热点 */}
+      <ThsHotspotsCard />
+
+      {/* 宏观指标明细 + 行业轮动 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <MacroIndicatorsPanel compact refreshKey={macroKey} />
+        <SectorRotationCard />
+      </div>
+
+      {/* 舆情热点 */}
+      {hotspots && hotspots.count > 0 && (
+        <Card><CardContent className="p-4">
+          <div className="text-xs font-medium text-red-600 mb-2">🔥 舆情热点 ({hotspots.count})</div>
+          {hotspots.hotspots?.slice(0,5).map((h:any,i:number) => (
+            <div key={i} className="text-xs py-0.5 border-b last:border-0">
+              <span className="font-mono">{h.code}</span> {h.name}
+              <span className="text-red-500 ml-1">({h.cnt}条 情感{h.avg_sentiment?.toFixed(1)})</span>
+            </div>
+          ))}
+        </CardContent></Card>
+      )}
+
+      {/* 双榜：价值 Top3 + 动量 Top3 */}
+      {sortedRank.length > 0 && (() => {
+        // 动量临时分 = technical×0.45 + capital×0.40 + industry×0.15（M1前用维度分假拼）
+        const momentumRank = [...v5Rank]
+          .map(s => {
+            const r = s as unknown as Record<string, number | null>;
+            const mom = (r.technical_score ?? 0) * 0.45
+              + (r.capital_score ?? 0) * 0.40
+              + (r.industry_score ?? 0) * 0.15;
+            return { ...s, _mom: mom };
+          })
+          .sort((a, b) => b._mom - a._mom);
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <h2 className="text-base font-semibold">🏦 价值 Top 3</h2>
+                <span className="text-[10px] text-muted-foreground">composite_v5（长持/研究）</span>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {sortedRank.slice(0, 3).map((stock) => (
+                  <StockCard key={stock.stock_id} stock={stock} onClick={() => router.push(`/stocks/${stock.stock_id}`)} />
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <h2 className="text-base font-semibold">🚀 动量 Top 3</h2>
+                <span className="text-[10px] text-muted-foreground">技术×0.45 + 资金×0.40（追涨/轮动）</span>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {momentumRank.slice(0, 3).map((stock) => (
+                  <StockCard key={stock.stock_id} stock={stock} onClick={() => router.push(`/stocks/${stock.stock_id}`)} />
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 评分分布 + PDF导出 */}
+      <div className="grid grid-cols-2 gap-4">
+        <Card>
+          <CardHeader><CardTitle className="text-base">V5 评分分布 ({v5Rank.length}只)</CardTitle></CardHeader>
+          <CardContent>
+            <ScoreDistribution scores={sortedRank} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">操作</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <button onClick={() => window.open("/api/report/pdf", "_blank")}
+              className="w-full px-4 py-2 bg-red-600 text-white rounded-md text-sm hover:bg-red-700">
+              📄 导出 PDF 报告
+            </button>
+            <button onClick={() => router.push("/stocks?view=grouped")}
+              className="w-full px-4 py-2 border rounded-md text-sm hover:bg-muted">
+              管理股票分组
+            </button>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* V5 评分排名 */}
+      {v5Rank.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-base">
+              🏆 V5 评分排名 · A股 ({v5Rank.length}只)
+              {v5CalcDate ? <span className="text-xs font-normal text-muted-foreground ml-2">评分日 {v5CalcDate}</span> : null}
+            </CardTitle>
+            <button
+              onClick={() => exportCsv(
+                `v5_ranking_${v5CalcDate ?? "latest"}.csv`,
+                ["代码", "名称", "综合分", "状态"],
+                sortedRank.map((r) => [r.code, r.name, (r.score ?? r.composite_v5)?.toFixed(1) ?? "", r.veto_status ?? ""])
+              )}
+              className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded border hover:bg-accent transition-colors"
+            >
+              导出 CSV
+            </button>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="max-h-[500px] overflow-auto">
+              <table className="w-full text-sm min-w-[400px]">
+                <thead className="sticky top-0 bg-card z-10">
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="py-2 px-2 w-8">#</th>
+                    <th className="py-2 px-2">代码</th>
+                    <th className="py-2 px-2">名称</th>
+                    <th className="py-2 px-2 text-right cursor-pointer select-none hover:text-foreground"
+                        onClick={() => handleRankSort("score")}>
+                      综合分{sortArrow("score")}
+                    </th>
+                    <th className="py-2 px-2 text-right">30天</th>
+                    <th className="py-2 px-2 text-right">状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedRank.map((r, i) => (
+                    <tr key={r.stock_id} className="border-b hover:bg-muted/50 cursor-pointer"
+                        onClick={() => router.push(`/stocks/${r.stock_id}`)}>
+                      <td className="py-1.5 px-2 font-mono text-xs text-muted-foreground">{i + 1}</td>
+                      <td className="py-1.5 px-2 font-mono">{r.code}</td>
+                      <td className="py-1.5 px-2">{r.name}</td>
+                      <td className={`py-1.5 px-2 text-right font-bold ${scoreTextClass(r.score ?? r.composite_v5)}`}>
+                        {(r.score ?? r.composite_v5)?.toFixed(1) ?? "-"}
+                      </td>
+                      <td className="py-1.5 px-2 text-right">
+                        <ScoreSparkline data={sparklines[String(r.stock_id)]} />
+                      </td>
+                      <td className="py-1.5 px-2 text-right text-xs">
+                        {r.veto_status === "exclude" ? (
+                          <span className="text-gray-600">回避</span>
+                        ) : r.veto_status === "reduce" ? (
+                          <span className="text-amber-600">减仓</span>
+                        ) : (
+                          <span className="text-muted-foreground">正常</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function ScoreDistribution({ scores }: { scores: { score?: number | null; composite_v5?: number | null }[] }) {
+  const bands = [
+    { label: "80-100", lo: 80, hi: 100, color: "bg-green-500" },
+    { label: "60-80",  lo: 60, hi: 80,  color: "bg-lime-500" },
+    { label: "40-60",  lo: 40, hi: 60,  color: "bg-yellow-400" },
+    { label: "20-40",  lo: 20, hi: 40,  color: "bg-orange-500" },
+    { label: "0-20",   lo: 0,  hi: 20,  color: "bg-red-500" },
+  ];
+  const counts = bands.map(({ lo, hi }) =>
+    scores.filter((s) => { const v = s.score ?? s.composite_v5; return v != null && v >= lo && v < hi; }).length
+  );
+  const max = Math.max(...counts, 1);
+
+  return (
+    <div className="space-y-2">
+      {bands.map(({ label, color }, i) => (
+        <div key={label} className="flex items-center gap-2 text-xs">
+          <span className="w-14 text-right text-muted-foreground tabular-nums">{label}</span>
+          <div className="flex-1 h-5 bg-muted rounded overflow-hidden">
+            <div
+              className={`h-full ${color} rounded transition-all flex items-center pl-1.5`}
+              style={{ width: `${Math.max((counts[i] / max) * 100, counts[i] > 0 ? 6 : 0)}%` }}
+            >
+              {counts[i] > 0 && <span className="text-[10px] text-white font-bold">{counts[i]}</span>}
+            </div>
+          </div>
+          {counts[i] === 0 && <span className="text-xs text-muted-foreground w-4">0</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
