@@ -43,11 +43,12 @@ def init(db_path: str | None = None):
     global _conn
     path = db_path or DB_PATH
 
-    _conn = sqlite3.connect(path, check_same_thread=False)
+    # timeout 加大到120s：启动建表/迁移需要熬过后台批任务的长写事务
+    _conn = sqlite3.connect(path, check_same_thread=False, timeout=120)
     _conn.row_factory = sqlite3.Row
     _conn.execute("PRAGMA journal_mode=WAL")
     _conn.execute("PRAGMA foreign_keys=ON")
-    _conn.execute("PRAGMA busy_timeout=30000")
+    _conn.execute("PRAGMA busy_timeout=120000")
     _conn.execute("PRAGMA synchronous=NORMAL")  # WAL下NORMAL安全且更快
 
     _create_tables()
