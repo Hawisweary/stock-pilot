@@ -208,7 +208,15 @@ def _create_tables():
 
     conn.commit()
     from migrations import run_migrations
-    run_migrations(conn)
+
+    try:
+        run_migrations(conn)
+    except sqlite3.OperationalError as e:
+        if "locked" not in str(e).lower():
+            raise
+        # 后台批任务(如周度同步)长期持有写锁时不阻塞启动：
+        # 迁移具备幂等性，跳过后将在下次空闲启动时补跑
+        print(f"[DB] 数据库忙,跳过启动迁移(下次启动补跑): {e}")
 
 
 def backup():
