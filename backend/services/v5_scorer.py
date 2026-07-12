@@ -829,7 +829,9 @@ def compute_stock_v5_tiers(
             conn.close()
 
 
-def persist_v5_score(stock_id: int, result: dict[str, Any], calc_date: str) -> None:
+def persist_v5_score(
+    stock_id: int, result: dict[str, Any], calc_date: str, *, quick: bool = False
+) -> None:
     breakdown = {
         "tiers": result.get("tiers"),
         "dim_scores": result.get("dim_scores"),
@@ -857,7 +859,10 @@ def persist_v5_score(stock_id: int, result: dict[str, Any], calc_date: str) -> N
     }
 
     def _do() -> None:
+        # quick 模式（API 实时路径）：短 busy_timeout 快速失败，不阻塞响应
         conn = _db_connect()
+        if quick:
+            conn.execute("PRAGMA busy_timeout=2000")
         try:
             row = conn.execute(
                 "SELECT 1 FROM comprehensive_scores WHERE stock_id=? AND calc_date=?",
@@ -912,7 +917,7 @@ def persist_v5_score(stock_id: int, result: dict[str, Any], calc_date: str) -> N
             conn.close()
 
     with write_lock:
-        _retry_locked(_do)
+        _retry_locked(_do, attempts=1 if quick else 15)
 
 
 def _latest_comprehensive_calc_date(
@@ -1138,5 +1143,15 @@ def get_stock_v5_score(stock_id: int) -> dict | None:
     finally:
         conn.close()
     if calc_date:
-        persist_v5_score(stock_id, result, calc_date)
+        # 持久化只是缓存优化：后台批任务持写锁时降级为不落库，仍返回已算出的分数
+        try:
+            persist_v5_score(stock_id, result, calc_date, quick=True)
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower():
+                raise
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "V5分数持久化跳过(数据库忙) stock_id=%s", stock_id
+            )
     return _format_v5_response(result)
