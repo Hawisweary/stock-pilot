@@ -211,7 +211,10 @@ def _create_tables():
 
 
 def backup():
-    """创建数据库备份（滚动保留最近5个）"""
+    """创建数据库备份（gzip 压缩，保留最近3个）"""
+    import gzip
+    import shutil
+
     if not os.path.exists(DB_PATH):
         return
 
@@ -228,15 +231,27 @@ def backup():
     src.close()
     dst.close()
 
-    # 滚动清理：保留最近5个
-    backups = sorted(
-        [f for f in os.listdir(backup_dir) if f.startswith("afr_backup_")],
-        reverse=True
+    # gzip 压缩后删除原始副本（恢复: gunzip 后直接使用）
+    gz_path = backup_path + ".gz"
+    with open(backup_path, "rb") as f_in, gzip.open(gz_path, "wb", compresslevel=6) as f_out:
+        shutil.copyfileobj(f_in, f_out, length=8 * 1024 * 1024)
+    os.remove(backup_path)
+
+    # 滚动清理：压缩备份保留最近3个；历史未压缩 .db 备份只留最新1个
+    gz_backups = sorted(
+        [f for f in os.listdir(backup_dir) if f.startswith("afr_backup_") and f.endswith(".gz")],
+        reverse=True,
     )
-    for old in backups[5:]:
+    for old in gz_backups[3:]:
+        os.remove(os.path.join(backup_dir, old))
+    plain = sorted(
+        [f for f in os.listdir(backup_dir) if f.startswith("afr_backup_") and f.endswith(".db")],
+        reverse=True,
+    )
+    for old in plain[1:]:
         os.remove(os.path.join(backup_dir, old))
 
-    print(f"[DB] 备份完成: {backup_path}")
+    print(f"[DB] 备份完成: {gz_path}")
 
 
 def close():

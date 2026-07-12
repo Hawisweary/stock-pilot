@@ -23,10 +23,10 @@ import threading
 import time as _time
 from datetime import datetime
 
-# 调度器状态
+# 调度器状态（旧版循环已下线，实际调度见 services/scheduler.py + scheduler_state 表）
 _scheduler_state = {
     "running": False, "last_fetch": "", "last_recalc": "",
-    "next_fetch": "每天18:00", "next_recalc": "每周一09:00",
+    "next_fetch": "每日15:30(services/scheduler.py)", "next_recalc": "随每日流水线",
 }
 from contextlib import asynccontextmanager
 
@@ -172,11 +172,13 @@ async def lifespan(app: FastAPI):
             print(f"[App] FTS 索引已同步 {fts_n} 条")
     except Exception as e:
         print(f"[App] FTS 索引同步跳过: {e}")
-    # 启动每日自动任务调度
+    # 启动每日自动任务调度（唯一调度入口：services/scheduler.py，
+    # 状态持久化+错过补跑+重任务子进程化）
     from services.scheduler import start_scheduler
     start_scheduler(app)
-    t = threading.Thread(target=scheduler_loop, daemon=True, name="fetch-recalc-scheduler")
-    t.start()
+    # 旧版 fetch-recalc 循环已下线：18:00 逐股抓取(eastmoney已封、每股1.5s约2.2小时)
+    # 与周一重算均被 15:30 每日流水线覆盖
+    _scheduler_state["note"] = "legacy loop disabled; see services/scheduler.py"
     try:
         from services.score_health_monitor import start_monitor_daemon
 

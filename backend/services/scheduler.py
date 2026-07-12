@@ -240,19 +240,32 @@ def run_daily_tasks():
     today = latest_trading_date()
     msg = f"{dt_date.today()}→{today} 自动任务: "
 
-    # ① 批量日行情同步（先拉新数据，后续计算才准确）
+    # ① 批量日行情同步 — 主源 Tushare（按日批量，快且不受 eastmoney 封锁影响）
+    #    失败时回退 tencent/eastmoney 逐股路径
     try:
         import subprocess, sys, os
-        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "sync_quotes_batch.py")
+        scripts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts")
         result = subprocess.run(
-            [sys.executable, script, "--days", "5", "--workers", "12"],
-            capture_output=True, text=True, timeout=900,
+            [sys.executable, os.path.join(scripts_dir, "tushare_bulk_backfill.py"),
+             "--quotes-days", "3", "--skip-financials", "--fund-flow-days", "3"],
+            capture_output=True, text=True, timeout=1200,
         )
-        # 从最后一行提取行数
+        if result.returncode != 0:
+            raise RuntimeError(f"tushare exit={result.returncode} {(result.stderr or '')[-120:]}")
         last_line = (result.stdout or "").strip().split("\n")[-1]
-        msg += f"行情同步({last_line[:60]}) "
+        msg += f"行情同步[tushare]({last_line[:80]}) "
     except Exception as e:
-        msg += f"行情同步:{e} "
+        msg += f"行情tushare失败:{str(e)[:80]} "
+        try:
+            result = subprocess.run(
+                [sys.executable, os.path.join(scripts_dir, "sync_quotes_batch.py"),
+                 "--days", "5", "--workers", "12"],
+                capture_output=True, text=True, timeout=900,
+            )
+            last_line = (result.stdout or "").strip().split("\n")[-1]
+            msg += f"行情同步[fallback]({last_line[:60]}) "
+        except Exception as e2:
+            msg += f"行情fallback:{str(e2)[:60]} "
 
     try:
         from services.valuation_engine import compute_valuation_scores
