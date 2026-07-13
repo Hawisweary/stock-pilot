@@ -44,8 +44,9 @@ pub fn run() {
         .manage(ServerProcesses(Mutex::new(vec![])))
         .setup(move |app| {
             // launch.sh daemon starts both FastAPI backend (:8800) and Next.js frontend (:3002)
+            // prod 模式：dev 热更新易崩且曾致旧构建/WebKit报错问题
             let child = Command::new("bash")
-                .args([&launch_sh, "daemon", "dev"])
+                .args([&launch_sh, "daemon", "prod"])
                 .current_dir(&project_dir)
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -59,22 +60,13 @@ pub fn run() {
         })
         .on_window_event(move |window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
-                let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/harrywang".to_string());
-                let project_dir = format!("{}/WorkBuddy/2026-05-18-task-7/ai-fundamental-researcher", home);
-                let launch_sh = format!("{}/launch.sh", project_dir);
-
-                // kill child pids tracked by launch.sh
-                let _ = Command::new("bash")
-                    .args([&launch_sh, "stop"])
-                    .current_dir(&project_dir)
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn();
-
-                // also kill the direct child
+                // 关窗口只关窗口：后端/前端/保活留在后台继续运行，
+                // 否则 02:00/15:30 的调度任务在窗口关闭期间全部丢失
+                // （曾是"调度器没跑/服务神秘停机"的总根源）。
+                // 需要彻底停止服务时手动执行 ./launch.sh stop。
                 let state = window.state::<ServerProcesses>();
                 for child in state.0.lock().unwrap().iter_mut() {
-                    let _ = child.kill();
+                    let _ = child.kill(); // 仅回收启动用的bash子进程
                 }
             }
         })
