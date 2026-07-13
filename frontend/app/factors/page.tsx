@@ -14,6 +14,7 @@ import {
 } from "recharts";
 
 import { V5_IC_LABELS, V5_IC_TO_STRATEGY } from "@/lib/v5Strategies";
+import { factorDescription } from "@/lib/factorDescriptions";
 
 const IC_LABELS = V5_IC_LABELS;
 const SCORE_TO_STRATEGY = V5_IC_TO_STRATEGY;
@@ -262,12 +263,20 @@ function FactorsLabInner() {
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
             {factors.map((f) => (
               <button key={f.factor_id as string} onClick={() => selectFactor(f.factor_id as string)}
+                title={factorDescription(f)}
                 className={`text-left p-2 rounded border text-xs ${selected === f.factor_id ? "border-primary ring-1" : ""}`}>
                 <div className="font-mono text-muted-foreground">{f.factor_id as string}</div>
                 <div className="font-bold">{f.name as string}</div>
               </button>
             ))}
           </div>
+          {factor && (
+            <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+              <span className="font-mono text-foreground">{factor.factor_id as string}</span>
+              <span className="font-medium text-foreground ml-1">{factor.name as string}</span>
+              <span className="ml-1">({factor.category as string})</span> — {factorDescription(factor)}
+            </div>
+          )}
           {analysis && factor && (
             <div className="grid md:grid-cols-2 gap-4">
               <Card>
