@@ -943,6 +943,11 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         CREATE INDEX IF NOT EXISTS idx_capital_resonance_date ON capital_resonance_daily(trade_date);
     """),
+    (49, """
+        -- factor_values 主键(stock_id,date,factor_id)无法服务按因子查询,
+        -- MAX(date)/按因子取截面曾全表扫描4秒+(366MB表)
+        CREATE INDEX IF NOT EXISTS idx_factor_values_fid_date ON factor_values(factor_id, date);
+    """),
 ]
 
 
