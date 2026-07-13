@@ -641,12 +641,38 @@ async def factor_s0_setup_api(migrate_wide: bool = True):
     return attach_meta(run_factor_s0_setup(migrate_wide=migrate_wide))
 
 
+# 因子分析结果缓存: (factor_id, forward_days) -> (因子数据最新日期, 结果)
+# 全量截面IC重算约13秒/次,因子值每日仅更新一次,数据日期不变直接命中
+_factor_analysis_cache: dict[tuple[str, int], tuple[str, dict]] = {}
+
+
+def _latest_factor_date(factor_id: str) -> str:
+    import sqlite3
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute(
+            "SELECT MAX(date) FROM factor_values WHERE factor_id=?", (factor_id,)
+        ).fetchone()
+        return row[0] or ""
+    finally:
+        conn.close()
+
+
 @router.get("/factors/{factor_id}/analysis")
 async def factor_analysis(factor_id: str, forward_days: int = 20):
-    """因子 IC + 分层 + 单调性/换手/显著性/多空曲线"""
+    """因子 IC + 分层 + 单调性/换手/显著性/多空曲线（按数据日期缓存）"""
     from services.factor_factory import factor_extended_analysis
 
-    return factor_extended_analysis(factor_id, forward_days=forward_days)
+    data_date = _latest_factor_date(factor_id)
+    key = (factor_id, forward_days)
+    hit = _factor_analysis_cache.get(key)
+    if hit and hit[0] == data_date:
+        return hit[1]
+    result = factor_extended_analysis(factor_id, forward_days=forward_days)
+    if data_date and isinstance(result, dict) and not result.get("error"):
+        _factor_analysis_cache[key] = (data_date, result)
+    return result
 
 
 @router.get("/factors/values")
