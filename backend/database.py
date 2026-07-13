@@ -62,6 +62,14 @@ CREATE TABLE IF NOT EXISTS factor_metrics_cache (
     stock_count INTEGER DEFAULT 0,
     updated_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS factor_analysis_cache (
+    factor_id TEXT NOT NULL,
+    forward_days INTEGER NOT NULL,
+    data_date TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (factor_id, forward_days)
+);
 """
 
 _cache_tables_ready = False

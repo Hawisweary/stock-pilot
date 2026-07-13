@@ -484,5 +484,13 @@ def run_daily_tasks():
     except Exception as e:
         msg += f"模拟盘:{e} "
 
+    try:
+        from services.factor_analysis_cache import warm_all
+
+        r = warm_all(forward_days=20)
+        msg += f"因子分析预热({r.get('warmed', 0)}/{r.get('total', 0)}) "
+    except Exception as e:
+        msg += f"因子分析预热:{e} "
+
     logger.info("[Scheduler] %s", msg)
     return msg
