@@ -98,6 +98,8 @@ def _update_ranks_for_date(conn: sqlite3.Connection, calc_date: str, factor_ids:
                 "UPDATE factor_values SET rank=? WHERE stock_id=? AND date=? AND factor_id=?",
                 (rank, sid, calc_date, fid),
             )
+        # 每个因子(全市场5292行UPDATE)提交一次，缩短写锁持有
+        conn.commit()
 
 
 def compute_factors_incremental(stock_ids: Optional[List[int]] = None) -> dict:
@@ -157,7 +159,7 @@ def compute_factors_incremental(stock_ids: Optional[List[int]] = None) -> dict:
                 (latest_cs,),
             ).fetchall()
         }
-        for sid in touch_list:
+        for n, sid in enumerate(touch_list, 1):
             if sid not in cs_rows:
                 continue
             vals = cs_rows[sid]
@@ -175,6 +177,10 @@ def compute_factors_incremental(stock_ids: Optional[List[int]] = None) -> dict:
                     _, qf = is_factor_value_valid("F002", sid, dt)
                 _upsert_factor(conn, sid, dt, fid, v, qf)
                 cells += 1
+            # 分批提交：避免13万+格写入裹在单事务里长期持有写锁
+            if n % 500 == 0:
+                conn.commit()
+        conn.commit()
 
     code_map: dict[int, str] = {}
     if touch_list:
@@ -185,10 +191,14 @@ def compute_factors_incremental(stock_ids: Optional[List[int]] = None) -> dict:
                 touch_list,
             ).fetchall()
         }
-    for sid in touch_list:
+    for n, sid in enumerate(touch_list, 1):
         cells += _compute_technical_factors(
             conn, sid, target_date, code=code_map.get(sid, "")
         )
+        # 技术因子逐股计算较慢，每100只释放一次写锁
+        if n % 100 == 0:
+            conn.commit()
+    conn.commit()
 
     try:
         deb_date = conn.execute("SELECT MAX(date) FROM debate_v2").fetchone()[0]

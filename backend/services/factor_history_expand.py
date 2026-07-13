@@ -29,6 +29,8 @@ def expand_factor_history(days: int = 90, db_path: str = None) -> dict:
         for dt in trade_dates:
             for (sid,) in stocks:
                 tech_count += _compute_technical_factors(conn, sid, dt)
+            # 每个交易日(全市场慢计算+写入)提交一次，避免跨日长事务持有写锁
+            conn.commit()
 
         score_count = _backfill_score_factors(conn)
         conn.commit()

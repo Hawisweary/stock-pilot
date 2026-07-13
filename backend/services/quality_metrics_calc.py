@@ -399,41 +399,57 @@ def compute_all_v5_metrics(stock_ids: list[int] | None = None) -> dict:
     finally:
         conn.close()
 
+    # 计算与写入分离：逐股计算耗时数小时，期间绝不持有写锁；
+    # 结果攒批后每500条一次短事务写入（写锁持有仅亚秒级）
     written = 0
     skipped = 0
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        for sid in ids:
-            m = compute_stock_v5_metrics(sid)
-            if not m:
-                skipped += 1
-                continue
-            conn.execute(
+    pending: list[tuple] = []
+
+    def _flush() -> None:
+        nonlocal written
+        if not pending:
+            return
+        conn = sqlite3.connect(DB_PATH, timeout=60)
+        try:
+            conn.executemany(
                 """INSERT OR REPLACE INTO stock_v5_metrics
                 (stock_id, calc_date, revenue_yoy_q, profit_yoy_q, growth_qoq_delta,
                  cfo_np, accrual_ratio, cfo_yoy, debt_ratio, debt_vs_industry,
                  quality_tier, growth_tier, source)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    m["stock_id"],
-                    m["calc_date"],
-                    m.get("revenue_yoy_q"),
-                    m.get("profit_yoy_q"),
-                    m.get("growth_qoq_delta"),
-                    m.get("cfo_np"),
-                    m.get("accrual_ratio"),
-                    m.get("cfo_yoy"),
-                    m.get("debt_ratio"),
-                    m.get("debt_vs_industry"),
-                    m.get("quality_tier"),
-                    m.get("growth_tier"),
-                    m.get("source"),
-                ),
+                pending,
             )
-            written += 1
-        conn.commit()
-    finally:
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
+        written += len(pending)
+        pending.clear()
+
+    for sid in ids:
+        m = compute_stock_v5_metrics(sid)
+        if not m:
+            skipped += 1
+            continue
+        pending.append(
+            (
+                m["stock_id"],
+                m["calc_date"],
+                m.get("revenue_yoy_q"),
+                m.get("profit_yoy_q"),
+                m.get("growth_qoq_delta"),
+                m.get("cfo_np"),
+                m.get("accrual_ratio"),
+                m.get("cfo_yoy"),
+                m.get("debt_ratio"),
+                m.get("debt_vs_industry"),
+                m.get("quality_tier"),
+                m.get("growth_tier"),
+                m.get("source"),
+            )
+        )
+        if len(pending) >= 500:
+            _flush()
+    _flush()
 
     return {"computed": written, "skipped": skipped, "total": len(ids)}
 

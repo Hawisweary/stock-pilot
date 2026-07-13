@@ -222,6 +222,22 @@ app.add_middleware(
 app.add_middleware(RequestLogMiddleware)
 app.add_middleware(ApiKeyMiddleware)
 
+
+# 全局兜底：后台批任务持有写锁时，任何接口的锁冲突统一降级为 503 + 友好提示，
+# 不再把 sqlite3.OperationalError 抛成 500 Internal Server Error
+@app.exception_handler(__import__("sqlite3").OperationalError)
+async def _sqlite_locked_handler(request, exc):
+    from fastapi.responses import JSONResponse
+
+    if "locked" in str(exc).lower():
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "数据后台更新中(批任务持有数据库锁)，请稍后重试"},
+        )
+    _logging.getLogger("afr.app").error("SQLite错误 %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(status_code=500, content={"detail": f"数据库错误: {exc}"})
+
+
 # 注册所有 API 路由
 register_blueprints(app)
 
