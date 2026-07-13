@@ -23,12 +23,18 @@ def get_universe_metrics(calc_date: str, conn: sqlite3.Connection, *, force_refr
     if not force_refresh and key in _cache:
         return _cache[key]
 
-    ensure_cache_table(conn)
+    # 元数据表 factor_metrics_cache 已迁移到缓存库 cache.db
+    from database import cache_connect
+
     if not force_refresh:
-        row = conn.execute(
-            "SELECT stock_count FROM factor_metrics_cache WHERE cache_key=?",
-            (key,),
-        ).fetchone()
+        cconn = cache_connect()
+        try:
+            row = cconn.execute(
+                "SELECT stock_count FROM factor_metrics_cache WHERE cache_key=?",
+                (key,),
+            ).fetchone()
+        finally:
+            cconn.close()
         if row and key in _cache:
             return _cache[key]
 
@@ -36,13 +42,17 @@ def get_universe_metrics(calc_date: str, conn: sqlite3.Connection, *, force_refr
     metrics = fe._get_all_metrics(ids)
     stocks_info = fe._load_stocks_info(ids)
     _cache[key] = {"metrics": metrics, "stocks_info": stocks_info, "universe_ids": ids}
-    conn.execute(
-        """INSERT OR REPLACE INTO factor_metrics_cache
-           (cache_key, calc_date, benchmark_mode, stock_count, updated_at)
-           VALUES (?, ?, ?, ?, datetime('now'))""",
-        (key, calc_date, fe.benchmark_mode, len(ids)),
-    )
-    conn.commit()
+    cconn = cache_connect()
+    try:
+        cconn.execute(
+            """INSERT OR REPLACE INTO factor_metrics_cache
+               (cache_key, calc_date, benchmark_mode, stock_count, updated_at)
+               VALUES (?, ?, ?, ?, datetime('now'))""",
+            (key, calc_date, fe.benchmark_mode, len(ids)),
+        )
+        cconn.commit()
+    finally:
+        cconn.close()
     return _cache[key]
 
 

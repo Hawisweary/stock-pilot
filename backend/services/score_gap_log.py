@@ -37,9 +37,10 @@ CREATE INDEX IF NOT EXISTS idx_gap_log_alert ON score_gap_log(alert_key, event_t
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(config.DB_PATH, timeout=120)
-    conn.row_factory = sqlite3.Row
-    return conn
+    # 已迁移到独立缓存库 cache.db：高频监控日志写入不再与主库批任务争写锁
+    from database import cache_connect
+
+    return cache_connect()
 
 
 def ensure_table(conn: sqlite3.Connection | None = None) -> None:

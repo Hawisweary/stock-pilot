@@ -27,7 +27,15 @@ def rows2list(rows: list[sqlite3.Row]) -> list[dict]:
 
 
 def execute_sql(sql: str, params: tuple = ()) -> list[dict]:
-    """执行查询并返回字典列表"""
+    """执行查询并返回字典列表（data_fetch_log 等缓存表自动路由到 cache.db）"""
+    if "data_fetch_log" in sql:
+        from database import cache_connect
+
+        cconn = cache_connect()
+        try:
+            return rows2list(cconn.execute(sql, params).fetchall())
+        finally:
+            cconn.close()
     conn, cur = get_db()
     cur.execute(sql, params)
     rows = cur.fetchall()

@@ -10,12 +10,76 @@ import os
 import time
 import shutil
 import threading
-from config import DB_PATH, DATA_DIR
+from config import CACHE_DB_PATH, DB_PATH, DATA_DIR
 
 # 全局连接池（单连接模式，WAL 支持并发读）
 _conn: sqlite3.Connection | None = None
 # 后台抓取线程与 API 共用连接时的写锁（RLock 支持 factor_engine → upsert 嵌套调用）
 write_lock = threading.RLock()
+
+# ---- 缓存库（cache.db）----
+# 日志/缓存类高频小写入独立成库，与主库批任务的写锁彻底解耦：
+# score_gap_log / data_fetch_log / factor_metrics_cache
+_CACHE_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS score_gap_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    target_date TEXT NOT NULL,
+    alert_key TEXT,
+    mode TEXT,
+    job_id TEXT,
+    active_stocks_count INTEGER,
+    stock_scope_json TEXT,
+    sync_rate_all_before REAL,
+    sync_rate_required_before REAL,
+    sync_rate_all_after REAL,
+    sync_rate_required_after REAL,
+    gap_summary_json TEXT,
+    actions_json TEXT,
+    alert_detail_json TEXT,
+    filled_count INTEGER DEFAULT 0,
+    skipped_count INTEGER DEFAULT 0,
+    error_count INTEGER DEFAULT 0,
+    duration_ms INTEGER,
+    triggered_by TEXT DEFAULT 'api',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS data_fetch_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    stock_id        INTEGER,
+    data_type       TEXT NOT NULL,
+    fetch_time      TEXT NOT NULL DEFAULT (datetime('now')),
+    status          TEXT NOT NULL DEFAULT 'success',
+    records_count   INTEGER DEFAULT 0,
+    error_message   TEXT DEFAULT '',
+    duration_ms     INTEGER DEFAULT 0,
+    source          TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS factor_metrics_cache (
+    cache_key TEXT PRIMARY KEY,
+    calc_date TEXT NOT NULL,
+    benchmark_mode TEXT NOT NULL,
+    stock_count INTEGER DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+"""
+
+_cache_tables_ready = False
+
+
+def cache_connect() -> sqlite3.Connection:
+    """获取缓存库连接（每次新建，WAL+短busy_timeout，调用方负责close）。"""
+    global _cache_tables_ready
+    conn = sqlite3.connect(CACHE_DB_PATH, timeout=10, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    if not _cache_tables_ready:
+        conn.executescript(_CACHE_TABLES_SQL)
+        conn.commit()
+        _cache_tables_ready = True
+    return conn
 
 
 def get_db_path() -> str:

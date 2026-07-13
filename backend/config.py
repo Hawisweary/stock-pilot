@@ -15,6 +15,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.dirname(BASE_DIR), "data")
 DB_PATH = os.path.join(DATA_DIR, "afr.db")
 DB_READ_PATH = os.getenv("AFR_DB_READ_PATH", os.path.join(DATA_DIR, "afr_read.db"))
+# 缓存/日志类表独立库：API 高频小写入与主库批任务写锁彻底解耦
+CACHE_DB_PATH = os.getenv("AFR_CACHE_DB_PATH", os.path.join(DATA_DIR, "cache.db"))
 
 # API
 # AFR_AUTH_ALL=true 或 AFR_API_KEY_REQUIRED=true 均可启用全路径鉴权（GET 也需 Key）

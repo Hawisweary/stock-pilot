@@ -40,15 +40,21 @@ class DataFetcher:
     def _flush_logs(self) -> None:
         if not self._log_buffer:
             return
-        with write_lock:
-            self.conn.executemany(
+        # data_fetch_log 已迁移到缓存库 cache.db，不再与主库争写锁
+        from database import cache_connect
+
+        cconn = cache_connect()
+        try:
+            cconn.executemany(
                 """INSERT INTO data_fetch_log
                    (stock_id, data_type, status, records_count, error_message, duration_ms, source)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 self._log_buffer,
             )
+            cconn.commit()
             self._log_buffer.clear()
-        self._commit()
+        finally:
+            cconn.close()
 
     def _flush_step_status(self) -> None:
         if not self._step_status_buffer:
@@ -95,14 +101,19 @@ class DataFetcher:
         if self._batch_commit:
             self._log_buffer.append(row)
             return
-        with write_lock:
-            self.conn.execute(
+        from database import cache_connect
+
+        cconn = cache_connect()
+        try:
+            cconn.execute(
                 """INSERT INTO data_fetch_log
                    (stock_id, data_type, status, records_count, error_message, duration_ms, source)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 row,
             )
-            self.conn.commit()
+            cconn.commit()
+        finally:
+            cconn.close()
 
     # ===== 公开方法 =====
 
@@ -246,14 +257,20 @@ class DataFetcher:
         record_step(stock_id, step, "skipped", reason, conn=self.conn)
 
     def _recent_fetch_errors(self, stock_id: int, limit: int = 8) -> list[dict]:
-        rows = self.conn.execute(
-            """
-            SELECT data_type, error_message FROM data_fetch_log
-            WHERE stock_id=? AND status='error'
-            ORDER BY id DESC LIMIT ?
-            """,
-            (stock_id, limit),
-        ).fetchall()
+        from database import cache_connect
+
+        cconn = cache_connect()
+        try:
+            rows = cconn.execute(
+                """
+                SELECT data_type, error_message FROM data_fetch_log
+                WHERE stock_id=? AND status='error'
+                ORDER BY id DESC LIMIT ?
+                """,
+                (stock_id, limit),
+            ).fetchall()
+        finally:
+            cconn.close()
         out = []
         for r in rows:
             msg = (r["error_message"] or "").strip()

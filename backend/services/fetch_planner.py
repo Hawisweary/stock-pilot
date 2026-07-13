@@ -50,15 +50,22 @@ def _last_success_map(conn: sqlite3.Connection, stock_ids: list[int]) -> dict[in
     if not stock_ids:
         return {}
     placeholders = ",".join("?" * len(stock_ids))
-    rows = conn.execute(
-        f"""
-        SELECT stock_id, data_type, MAX(fetch_time) AS ft
-        FROM data_fetch_log
-        WHERE stock_id IN ({placeholders}) AND status='success'
-        GROUP BY stock_id, data_type
-        """,
-        stock_ids,
-    ).fetchall()
+    # data_fetch_log 在缓存库 cache.db（conn 参数保留兼容旧签名，不再使用）
+    from database import cache_connect
+
+    cconn = cache_connect()
+    try:
+        rows = cconn.execute(
+            f"""
+            SELECT stock_id, data_type, MAX(fetch_time) AS ft
+            FROM data_fetch_log
+            WHERE stock_id IN ({placeholders}) AND status='success'
+            GROUP BY stock_id, data_type
+            """,
+            stock_ids,
+        ).fetchall()
+    finally:
+        cconn.close()
     out: dict[int, dict[str, datetime]] = {}
     for r in rows:
         sid = int(r[0])
