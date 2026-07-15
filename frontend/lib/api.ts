@@ -72,56 +72,82 @@ async function request<T>(path: string, options?: ApiRequestInit): Promise<T> {
     if (cached !== null) return cached as T;
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const isGet = !fetchOptions.method || fetchOptions.method === "GET";
 
-  try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      ...fetchOptions,
-      headers: buildHeaders(fetchOptions.headers as HeadersInit),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      let message = formatErrorDetail(err.detail) || res.statusText || `HTTP ${res.status}`;
-      if (res.status >= 500 && /internal server error/i.test(message) && !formatErrorDetail(err.detail)) {
-        message = "后端内部错误（请查看 launch.sh 日志或重启：./launch.sh start）";
+  const attempt = async (): Promise<T> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(`${API_BASE}${path}`, {
+        ...fetchOptions,
+        headers: buildHeaders(fetchOptions.headers as HeadersInit),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        let message = formatErrorDetail(err.detail) || res.statusText || `HTTP ${res.status}`;
+        if (res.status >= 500 && /internal server error/i.test(message) && !formatErrorDetail(err.detail)) {
+          message = "后端内部错误（请查看 launch.sh 日志或重启：./launch.sh start）";
+        }
+        const httpErr = new Error(message) as Error & { status?: number };
+        httpErr.status = res.status;
+        throw httpErr;
       }
-      throw new Error(message);
-    }
-    const data = await res.json();
+      const data = await res.json();
 
-    // 200 但含 truthy error 字段且非降级场景 → 抛出错误（SEC-OPS P0-5）
-    if (
-      data &&
-      typeof data === "object" &&
-      (data as Record<string, unknown>).error &&
-      !(data as Record<string, unknown>).degraded
-    ) {
-      const errMsg =
-        (data as Record<string, unknown>).message ||
-        (data as Record<string, unknown>).error;
-      throw new Error(typeof errMsg === "string" ? errMsg : String(errMsg));
-    }
+      // 200 但含 truthy error 字段且非降级场景 → 抛出错误（SEC-OPS P0-5）
+      if (
+        data &&
+        typeof data === "object" &&
+        (data as Record<string, unknown>).error &&
+        !(data as Record<string, unknown>).degraded
+      ) {
+        const errMsg =
+          (data as Record<string, unknown>).message ||
+          (data as Record<string, unknown>).error;
+        throw new Error(typeof errMsg === "string" ? errMsg : String(errMsg));
+      }
 
-    // GET 请求缓存结果（V5 实时评分除外）
-    if (
-      (!fetchOptions.method || fetchOptions.method === "GET") &&
-      !path.includes("/v5/")
-    ) {
-      setCache(cacheKey(path), data);
-    }
+      // GET 请求缓存结果（V5 实时评分除外）
+      if (isGet && !path.includes("/v5/")) {
+        setCache(cacheKey(path), data);
+      }
 
-    return data as T;
-  } catch (e: unknown) {
-    clearTimeout(timeoutId);
-    if (e instanceof DOMException && e.name === "AbortError") {
-      const sec = Math.round(timeoutMs / 1000);
-      throw new Error(`请求超时（${sec}s），请稍后重试`);
+      return data as T;
+    } catch (e: unknown) {
+      clearTimeout(timeoutId);
+      if (e instanceof DOMException && e.name === "AbortError") {
+        const sec = Math.round(timeoutMs / 1000);
+        throw new Error(`请求超时（${sec}s），请稍后重试`);
+      }
+      throw e;
     }
-    throw e;
+  };
+
+  // 仅 GET（幂等）在瞬时故障时自动重试 2 次：后端重启期间的连接拒绝
+  // (TypeError: Failed to fetch) 或 502/503/504 网关错误，避免页面因一次
+  // 撞上重启窗口就空白/报错。POST 等写请求绝不重试（防止重复下单）。
+  if (!isGet) return attempt();
+
+  let lastErr: unknown;
+  for (let i = 0; i < 3; i++) {
+    try {
+      return await attempt();
+    } catch (e: unknown) {
+      lastErr = e;
+      const status = (e as { status?: number })?.status;
+      const isNetworkFail = e instanceof TypeError; // fetch 连接失败
+      const isGateway = status === 502 || status === 503 || status === 504;
+      if (i < 2 && (isNetworkFail || isGateway)) {
+        await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+        continue;
+      }
+      throw e;
+    }
   }
+  throw lastErr;
 }
 
 /** V5 重算完成后派发，各页面监听并刷新评分 */

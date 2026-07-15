@@ -65,7 +65,18 @@
       "Bash(sqlite3 /Users/harrywang/WorkBuddy/2026-05-18-task-7/ai-fundamental-researcher/data/afr.db \".schema comprehensive_scores\")",
       "Bash(python3 -c \"import sys,json; d=json.loads\\(sys.stdin.read\\(\\)\\); print\\(json.dumps\\(d,indent=2,ensure_ascii=False\\)\\)\")",
       "Bash(python3 -c \"import sys,json; d=sys.stdin.read\\(\\).strip\\(\\); print\\(json.dumps\\(json.loads\\(d\\),indent=2,ensure_ascii=False\\)\\)\")",
-      "Bash(python3 -c \"import sys,json; print\\(json.dumps\\(json.loads\\(sys.stdin.read\\(\\)\\),indent=2,ensure_ascii=False\\)\\)\")"
+      "Bash(python3 -c \"import sys,json; print\\(json.dumps\\(json.loads\\(sys.stdin.read\\(\\)\\),indent=2,ensure_ascii=False\\)\\)\")",
+      "Bash(ls -la /Users/harrywang/Projects/pios/briefings/ | tail -5)",
+      "Read(//Users/harrywang/Projects/pios/**)",
+      "Bash(python3 scripts/pios.py events --days 7)",
+      "Bash(python3 scripts/pios.py events --days 7 --verbose)",
+      "Bash(python3 scripts/pios.py events --days 14)",
+      "Bash(python3 scripts/pios.py --help)",
+      "Bash(sqlite3 pios.db \".schema proposals\")",
+      "Bash(sqlite3 pios.db \".schema decisions\")",
+      "Bash(mkdir -p /Users/harrywang/Projects/pios/proposals/2026 && ls /Users/harrywang/Projects/pios/proposals/2026)",
+      "Bash(sqlite3 pios.db \"INSERT INTO proposals \\(id, ts, kind, rationale, diff, status, decided_ts\\) VALUES \\('prop-20260716-001','2026-07-16T09:00:00+08:00','new_topic','vault/identity/profile.md 的方向收敛机制一节明确建议创建 vault/decisions/2026-07-direction-portfolio.md，把四个候选方向的收敛显式化为 Decision；但 vault/decisions/ 目前为空，该建议尚未落地。','{\\\\\"action\\\\\":\\\\\"create_file\\\\\",\\\\\"path\\\\\":\\\\\"vault/decisions/2026-07-direction-portfolio.md\\\\\",\\\\\"review_at\\\\\":\\\\\"2027-01-15\\\\\"}','pending',NULL\\);\")",
+      "Bash(sqlite3 pios.db \"SELECT id, kind, status FROM proposals;\")"
     ]
   }
 }
