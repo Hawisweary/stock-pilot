@@ -353,12 +353,30 @@ def create_portfolio(name: str, initial_cash: float = 100000, owner_id: str = "d
     return {"id": pid, "name": name, "cash": initial_cash, "total_value": initial_cash}
 
 
+# 实时行情 TTL 缓存：腾讯接口偶发超时(5-8秒)会拖垮组合页每次加载,
+# 盘中20秒/收盘后10分钟内直接复用,拉取失败时用上次结果兜底
+_rt_cache_store: dict = {"data": {}, "ts": 0.0}
+
+
+def _rt_cache_ttl() -> float:
+    from datetime import datetime
+
+    now = datetime.now()
+    is_trading_hours = now.weekday() < 5 and 9 <= now.hour < 15
+    return 20.0 if is_trading_hours else 600.0
+
+
 def fetch_rt_cache_for_all_portfolios() -> dict[str, dict]:
-    """跨所有组合去重股票代码，一次性批量拉实时行情。
+    """跨所有组合去重股票代码，一次性批量拉实时行情(带TTL缓存+失败兜底)。
 
     供 get_portfolios() / get_pnl_summary() 等需要跨多个组合展示市值的场景复用，
     避免每个组合各自触发一次 tencent_quote 外部请求（N 个组合 = N 次网络往返）。
     """
+    import time as _time
+
+    if _rt_cache_store["data"] and _time.time() - _rt_cache_store["ts"] < _rt_cache_ttl():
+        return _rt_cache_store["data"]
+
     conn = sqlite3.connect(DB_PATH)
     try:
         codes = [
@@ -375,9 +393,14 @@ def fetch_rt_cache_for_all_portfolios() -> dict[str, dict]:
     try:
         from services.data_sources import tencent_quote
 
-        return tencent_quote(codes)
+        data = tencent_quote(codes)
+        if data:
+            _rt_cache_store["data"] = data
+            _rt_cache_store["ts"] = _time.time()
+        return data or _rt_cache_store["data"]
     except Exception:
-        return {}
+        # 网络失败：返回上次成功结果(可能略旧),页面按DB收盘价兜底也能正常渲染
+        return _rt_cache_store["data"]
 
 
 def get_portfolios(rt_cache: dict[str, dict] | None = None) -> list:
