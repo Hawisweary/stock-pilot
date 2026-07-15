@@ -234,24 +234,53 @@ def _sync_to_comprehensive(table: str, column: str, calc_date: str) -> int:
     return synced
 
 
+def _todays_quotes_ready() -> bool:
+    """今天(若为交易日)的行情是否已入库。非交易日恒为True。"""
+    import sqlite3
+    from datetime import date as dt_date
+
+    today_str = dt_date.today().strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    try:
+        cal = conn.execute(
+            "SELECT is_open FROM trade_calendar WHERE cal_date=?", (today_str,)
+        ).fetchone()
+        if cal is not None and not cal[0]:
+            return True  # 非交易日
+        n = conn.execute(
+            "SELECT COUNT(*) FROM stock_daily_quotes WHERE trade_date=?", (today_str,)
+        ).fetchone()[0]
+        return n > 1000
+    except sqlite3.OperationalError:
+        return True  # 表缺失等异常时不阻塞流程
+    finally:
+        conn.close()
+
+
 def run_daily_tasks():
     from datetime import date as dt_date
 
-    today = latest_trading_date()
-    msg = f"{dt_date.today()}→{today} 自动任务: "
+    msg = ""
 
     # ① 批量日行情同步 — 主源 Tushare（按日批量，快且不受 eastmoney 封锁影响）
+    #    15:30 紧贴收盘,Tushare 当日日线可能尚未发布：未就绪则等待重试(最多4次×15分钟)
     #    失败时回退 tencent/eastmoney 逐股路径
     try:
         import subprocess, sys, os
         scripts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts")
-        result = subprocess.run(
-            [sys.executable, os.path.join(scripts_dir, "tushare_bulk_backfill.py"),
-             "--quotes-days", "3", "--skip-financials", "--fund-flow-days", "3"],
-            capture_output=True, text=True, timeout=1200,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"tushare exit={result.returncode} {(result.stderr or '')[-120:]}")
+        for attempt in range(1, 5):
+            result = subprocess.run(
+                [sys.executable, os.path.join(scripts_dir, "tushare_bulk_backfill.py"),
+                 "--quotes-days", "3", "--skip-financials", "--fund-flow-days", "3"],
+                capture_output=True, text=True, timeout=1200,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"tushare exit={result.returncode} {(result.stderr or '')[-120:]}")
+            if _todays_quotes_ready():
+                break
+            if attempt < 4:
+                msg += f"当日行情未发布(第{attempt}次),15分钟后重试 "
+                time.sleep(900)
         last_line = (result.stdout or "").strip().split("\n")[-1]
         msg += f"行情同步[tushare]({last_line[:80]}) "
     except Exception as e:
@@ -266,6 +295,10 @@ def run_daily_tasks():
             msg += f"行情同步[fallback]({last_line[:60]}) "
         except Exception as e2:
             msg += f"行情fallback:{str(e2)[:60]} "
+
+    # 目标日期必须在行情同步之后解析，否则全流程按旧交易日计算
+    today = latest_trading_date()
+    msg = f"{dt_date.today()}→{today} 自动任务: " + msg
 
     try:
         from services.valuation_engine import compute_valuation_scores
