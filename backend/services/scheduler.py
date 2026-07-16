@@ -97,8 +97,24 @@ def start_scheduler(app):
         # 状态持久化在 DB，进程重启后自动恢复；触发条件为
         # 「已过当日触发时刻 且 今天尚未执行」→ 错过窗口也会在重启后补跑
         state = _load_state()
+        last_wal_check = 0.0
         while True:
             now = datetime.now()
+
+            # WAL 看门狗：每 ~5 分钟检查一次,WAL 超过 512MB 就 TRUNCATE。
+            # 常驻读连接会阻塞被动 autocheckpoint,此主动兜底防止 WAL 膨胀
+            # 到打爆后端(曾涨到 154GB 导致每个读查询扫穿 WAL 卡死全站)
+            if time.time() - last_wal_check > 300:
+                last_wal_check = time.time()
+                try:
+                    import database as _db
+
+                    r = _db.checkpoint("TRUNCATE", wal_threshold_mb=512)
+                    if not r.get("skipped"):
+                        logger.info("[Scheduler] WAL checkpoint: %s", r)
+                except Exception as e:
+                    logger.warning("[Scheduler] WAL checkpoint failed: %s", e)
+
             today_key = now.strftime("%Y-%m-%d")
             from config import (
                 V5_NIGHTLY_FETCH_HOUR,

@@ -103,6 +103,28 @@ def get() -> sqlite3.Connection:
     return _conn
 
 
+def checkpoint(mode: str = "TRUNCATE", *, wal_threshold_mb: float | None = None) -> dict:
+    """主动 checkpoint WAL,防止其无限膨胀拖垮读查询。
+
+    用独立连接执行(不占用常驻 _conn)。wal_threshold_mb 非空时,仅当 WAL
+    超过该大小才执行 TRUNCATE,否则跳过(降低无谓开销)。
+    """
+    wal_path = DB_PATH + "-wal"
+    try:
+        wal_mb = os.path.getsize(wal_path) / 1e6 if os.path.exists(wal_path) else 0.0
+    except OSError:
+        wal_mb = 0.0
+    if wal_threshold_mb is not None and wal_mb < wal_threshold_mb:
+        return {"skipped": True, "wal_mb": round(wal_mb, 1)}
+    conn = sqlite3.connect(DB_PATH, timeout=120)
+    try:
+        conn.execute("PRAGMA busy_timeout=120000")
+        row = conn.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+        return {"wal_mb_before": round(wal_mb, 1), "result": row, "mode": mode}
+    finally:
+        conn.close()
+
+
 def is_initialized() -> bool:
     """检查数据库是否已初始化"""
     return _conn is not None and os.path.exists(DB_PATH)
@@ -122,6 +144,9 @@ def init(db_path: str | None = None):
     _conn.execute("PRAGMA foreign_keys=ON")
     _conn.execute("PRAGMA busy_timeout=120000")
     _conn.execute("PRAGMA synchronous=NORMAL")  # WAL下NORMAL安全且更快
+    # 每 2000 页(约8MB)自动 checkpoint；配合 scheduler 的周期性 TRUNCATE checkpoint,
+    # 防止 WAL 无限膨胀(曾因常驻读连接阻塞被动checkpoint,WAL涨到154GB打爆后端)
+    _conn.execute("PRAGMA wal_autocheckpoint=2000")
 
     _create_tables()
     print(f"[DB] 数据库初始化完成: {path}")
