@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
-const apiBackend = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8800";
+// 用 127.0.0.1 而非 localhost：localhost 在本机优先解析 IPv6 ::1,而后端 uvicorn
+// 只监听 IPv4,Node 代理走 ::1 会 "socket hang up",导致 /api 间歇性失败(因子库/组合空)
+const apiBackend = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8800";
 
 const nextConfig: NextConfig = {
   typescript: {
