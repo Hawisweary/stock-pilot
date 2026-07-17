@@ -74,7 +74,7 @@ start_frontend_dev() {
     ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || true
     export WATCHPACK_POLLING=true
     export CHOKIDAR_USEPOLLING=true
-    nohup npx next dev -p "$FRONTEND_PORT" -H 0.0.0.0 </dev/null >> "$PID_DIR/frontend.log" 2>&1 &
+    nohup npx next dev -p "$FRONTEND_PORT" -H :: </dev/null >> "$PID_DIR/frontend.log" 2>&1 &
     echo $! > "$FRONTEND_PID"
     disown 2>/dev/null || true
     echo "dev" > "$FRONTEND_MODE_FILE"
@@ -99,7 +99,7 @@ start_frontend_prod() {
             return 1
         }
     fi
-    nohup npx next start -p "$FRONTEND_PORT" -H 0.0.0.0 </dev/null >> "$PID_DIR/frontend.log" 2>&1 &
+    nohup npx next start -p "$FRONTEND_PORT" -H :: </dev/null >> "$PID_DIR/frontend.log" 2>&1 &
     echo $! > "$FRONTEND_PID"
     disown 2>/dev/null || true
     echo "prod" > "$FRONTEND_MODE_FILE"
