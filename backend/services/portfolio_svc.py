@@ -408,9 +408,10 @@ def get_portfolios(rt_cache: dict[str, dict] | None = None) -> list:
     未传时自动批量拉取一次（而非逐组合各自拉取）。"""
     if rt_cache is None:
         rt_cache = fetch_rt_cache_for_all_portfolios()
-    conn = connect_db(write=True)
+    # 只读连接：WAL 下读永不被批任务写锁阻塞(此前用 write 连接+_ensure_tables
+    # 会拿写锁,批任务跑时该读接口被 database is locked 打成 500 → 前端0组合)
+    conn = connect_db(ro=True)
     conn.row_factory = sqlite3.Row
-    _ensure_tables(conn)
     rows = [dict(r) for r in conn.execute("SELECT * FROM portfolios ORDER BY created_at DESC").fetchall()]
     for r in rows:
         r["total_value"] = calc_total_value(r["id"], _conn=conn, rt_cache=rt_cache)
@@ -426,9 +427,8 @@ def get_pnl_summary(rt_cache: dict[str, dict] | None = None) -> list:
     """
     if rt_cache is None:
         rt_cache = fetch_rt_cache_for_all_portfolios()
-    conn = connect_db(write=True)
+    conn = connect_db(ro=True)  # 只读:不被批任务写锁阻塞(见 get_portfolios 说明)
     conn.row_factory = sqlite3.Row
-    _ensure_tables(conn)
     portfolios = [dict(r) for r in conn.execute("SELECT id, name FROM portfolios ORDER BY created_at DESC").fetchall()]
     all_positions = conn.execute(
         """SELECT pp.portfolio_id, pp.stock_id, pp.shares, pp.avg_cost, s.code, s.name

@@ -139,8 +139,10 @@ async function request<T>(path: string, options?: ApiRequestInit): Promise<T> {
       lastErr = e;
       const status = (e as { status?: number })?.status;
       const isNetworkFail = e instanceof TypeError; // fetch 连接失败
-      const isGateway = status === 502 || status === 503 || status === 504;
-      if (i < 2 && (isNetworkFail || isGateway)) {
+      // 500 也重试:后端批任务持写锁时读接口会短暂 database is locked → 500,
+      // 属瞬时故障;GET 幂等,退避重试基本可命中锁释放的间隙
+      const isServerErr = status === 500 || status === 502 || status === 503 || status === 504;
+      if (i < 2 && (isNetworkFail || isServerErr)) {
         await new Promise((r) => setTimeout(r, 800 * (i + 1)));
         continue;
       }
