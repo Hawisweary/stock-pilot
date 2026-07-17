@@ -25,6 +25,17 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // 页面HTML禁止缓存:此前预渲染页带 s-maxage=31536000,WebKit(Tauri)会缓存
+  // 旧构建的页面shell,多次重建后app一直跑陈旧JS→拿到数据也渲染不出。
+  // 静态资源(_next/static,内容哈希不可变)与API不受影响。
+  async headers() {
+    return [
+      {
+        source: "/((?!_next/static|_next/image|favicon.ico|api/).*)",
+        headers: [{ key: "Cache-Control", value: "no-store, must-revalidate" }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
