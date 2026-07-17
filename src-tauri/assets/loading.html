@@ -75,5 +75,32 @@
       <span class="dots"><span>.</span><span>.</span><span>.</span></span>
     </div>
   </div>
+  <script>
+    // 自导航:不依赖 Rust 端 eval(其在 webview 未就绪时会静默失败,导致永远卡在本页)。
+    // 页面自身轮询前端就绪后跳转,消除导航时序竞态。
+    (function () {
+      var FRONTEND = "http://127.0.0.1:3002";
+      var statusEl = document.getElementById("status");
+      var tries = 0;
+      function attempt() {
+        tries++;
+        // no-cors:只探测可达性(拿到不透明响应即视为就绪),避免跨源CORS导致误判
+        fetch(FRONTEND + "/", { mode: "no-cors", cache: "no-store" })
+          .then(function () {
+            statusEl.textContent = "Loading interface";
+            window.location.replace(FRONTEND);
+          })
+          .catch(function () {
+            if (tries < 150) {
+              statusEl.textContent = "Launching AI backend (" + tries + ")";
+              setTimeout(attempt, 800);
+            } else {
+              statusEl.textContent = "启动超时,请重开 app 或运行 ./launch.sh daemon";
+            }
+          });
+      }
+      attempt();
+    })();
+  </script>
 </body>
 </html>
