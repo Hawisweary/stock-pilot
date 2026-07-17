@@ -18,7 +18,9 @@ fn wait_and_navigate(handle: tauri::AppHandle, port: u16, label: &'static str) {
         while start.elapsed() < timeout {
             if port_ready(port) {
                 if let Some(w) = handle.get_webview_window("main") {
-                    let url = format!("http://localhost:{}", port);
+                    // 用 127.0.0.1 而非 localhost：localhost 在本机优先解析为 IPv6 ::1,
+                    // 而 next-server 只监听 IPv4,WebKit 走 ::1 会连接被拒导致所有 /api 失败
+                    let url = format!("http://127.0.0.1:{}", port);
                     let _ = w.eval(&format!("window.location.href = '{}'", url));
                 }
                 return;
