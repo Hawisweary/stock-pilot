@@ -179,6 +179,12 @@ async def lifespan(app: FastAPI):
     # 旧版 fetch-recalc 循环已下线：18:00 逐股抓取(eastmoney已封、每股1.5s约2.2小时)
     # 与周一重算均被 15:30 每日流水线覆盖
     _scheduler_state["note"] = "legacy loop disabled; see services/scheduler.py"
+    # 后台预热 beta-health 缓存(内部重聚合 20s+,预热后页面首次加载不阻塞)
+    try:
+        from services.beta_health import warm_beta_health
+        warm_beta_health()
+    except Exception as e:
+        print(f"[App] beta-health 预热跳过: {e}")
     try:
         from services.score_health_monitor import start_monitor_daemon
 

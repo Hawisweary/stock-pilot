@@ -45,7 +45,62 @@ def get_rust_backtest_status() -> dict:
     }
 
 
-def get_beta_health() -> dict:
+# beta-health 被 Layout 在每次页面加载调用,而内部聚合(COUNT(*)/DISTINCT
+# 在千万行 factor_values 上)耗时 20s+,并阻塞事件循环、耗尽浏览器连接池,
+# 曾导致全站请求超时、组合页空白。结果每日仅变一次。
+# 策略:stale-while-revalidate —— 缓存过期也先返回旧值,后台线程刷新,
+# 保证任何请求都不阻塞;仅首个请求(无任何缓存)会等待,已在启动时预热。
+import threading as _threading
+
+_health_cache: dict = {"data": None, "ts": 0.0}
+_HEALTH_TTL = 600.0
+_refresh_lock = _threading.Lock()
+_refreshing = False
+
+
+def _refresh_health_async() -> None:
+    global _refreshing
+    with _refresh_lock:
+        if _refreshing:
+            return
+        _refreshing = True
+    try:
+        import time as _t
+
+        result = _compute_beta_health()
+        _health_cache["data"] = result
+        _health_cache["ts"] = _t.time()
+    except Exception:
+        pass
+    finally:
+        _refreshing = False
+
+
+def get_beta_health(force: bool = False) -> dict:
+    import time as _t
+
+    fresh = _health_cache["data"] is not None and _t.time() - _health_cache["ts"] < _HEALTH_TTL
+    if fresh and not force:
+        return _health_cache["data"]
+
+    if _health_cache["data"] is not None and not force:
+        # 有旧值:立即返回,后台刷新(绝不阻塞请求)
+        _threading.Thread(target=_refresh_health_async, daemon=True).start()
+        return _health_cache["data"]
+
+    # 无任何缓存(首个请求/强制):同步计算一次
+    result = _compute_beta_health()
+    _health_cache["data"] = result
+    _health_cache["ts"] = _t.time()
+    return result
+
+
+def warm_beta_health() -> None:
+    """启动时后台预热,避免首个页面请求等待 20s+。"""
+    _threading.Thread(target=lambda: get_beta_health(force=True), daemon=True).start()
+
+
+def _compute_beta_health() -> dict:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
 

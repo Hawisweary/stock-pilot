@@ -42,8 +42,8 @@ async def list_errors(limit: int = 50):
 
 
 @router.get("/beta-health")
-async def beta_health():
-    """Beta 模块数据就绪检查"""
+def beta_health():
+    """Beta 模块数据就绪检查（同步 def → FastAPI 走线程池，重聚合不阻塞事件循环）"""
     from services.beta_health import get_beta_health
 
     return get_beta_health()
