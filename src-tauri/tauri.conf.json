@@ -1,5 +1,5 @@
 {
-  "productName": "AI Fundamental Researcher",
+  "productName": "Stock Pilot",
   "version": "0.1.0",
   "identifier": "com.afr.app",
   "build": {
@@ -9,7 +9,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "AI Fundamental Researcher",
+        "title": "Stock Pilot",
         "width": 1440,
         "height": 900,
         "url": "loading.html",

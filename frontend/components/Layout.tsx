@@ -88,7 +88,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <div className="flex h-14 items-center border-b px-6 justify-between">
         <div className="flex items-center">
           <BarChart3 className="h-6 w-6 text-primary mr-2" />
-          <span className="font-bold text-lg">AI 基本面研究员</span>
+          <span className="font-bold text-lg">Stock Pilot</span>
         </div>
         <button
           onClick={() => setDrawerOpen(false)}
@@ -151,7 +151,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <Menu className="h-5 w-5" />
         </button>
         <BarChart3 className="h-5 w-5 text-primary" />
-        <span className="font-bold text-base flex-1">AI 基本面研究员</span>
+        <span className="font-bold text-base flex-1">Stock Pilot</span>
       </header>
 
       {drawerOpen && (

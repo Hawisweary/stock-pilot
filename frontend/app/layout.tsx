@@ -11,8 +11,8 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "AI 基本面研究员",
-  description: "自动化财务分析 + 股票基本面研究 + AI辅助投资决策系统",
+  title: "Stock Pilot",
+  description: "A股量化投研平台 · 十维评分 · 因子实验室 · 回测 · 模拟盘",
 };
 
 export default function RootLayout({
