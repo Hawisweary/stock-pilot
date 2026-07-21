@@ -55,3 +55,7 @@ build/
 
 # 第三方参考源码(可重新下载,含内嵌git仓库)
 third_party/
+
+# 含真实密钥,绝不入库
+.envrc
+.env.local
