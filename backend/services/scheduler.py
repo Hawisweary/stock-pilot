@@ -63,6 +63,20 @@ def _save_state(key: str, value: str) -> None:
         logger.warning("[Scheduler] 保存调度状态失败 %s=%s: %s", key, value, e)
 
 
+def _weekly_overdue_days(last_date: str | None, today_key: str) -> int:
+    """距上次成功周度同步的天数(用于错过整个触发日后的补跑判断)。"""
+    if not last_date:
+        return 999
+    try:
+        from datetime import date as _d
+
+        a = _d.fromisoformat(last_date)
+        b = _d.fromisoformat(today_key)
+        return (b - a).days
+    except Exception:
+        return 0
+
+
 def _run_job_subprocess(job: str, timeout_sec: int) -> str:
     """在独立子进程运行调度作业，避免重任务阻塞 API 进程线程池。
 
@@ -140,7 +154,14 @@ def start_scheduler(app):
                 state[_STATE_KEYS["nightly_fetch"]] = today_key
                 _save_state(_STATE_KEYS["nightly_fetch"], today_key)
             if (
-                now.weekday() == V5_WEEKLY_WEEKDAY
+                (
+                    # 正常:周度触发日且已过触发时刻
+                    (now.weekday() == V5_WEEKLY_WEEKDAY
+                     and now_minutes >= V5_WEEKLY_HOUR * 60 + V5_WEEKLY_MINUTE)
+                    # 补跑:整个触发日后端离线错过时,距上次成功≥7天则任意日补跑
+                    # (否则要再等一整周;日/夜间任务无此限制,周度曾因此卡9天)
+                    or _weekly_overdue_days(state.get(_STATE_KEYS["weekly_sync"]), today_key) >= 7
+                )
                 and now_minutes >= V5_WEEKLY_HOUR * 60 + V5_WEEKLY_MINUTE
                 and state.get(_STATE_KEYS["weekly_sync"]) != today_key
             ):
