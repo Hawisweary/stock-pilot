@@ -399,11 +399,14 @@ def run_daily_tasks():
         msg += f"因子历史:{e} "
 
     try:
-        from services.factor_retention import prune_factor_values
+        from services.factor_retention import prune_empty_factors, prune_factor_values
 
         r = prune_factor_values()
         if r.get("pruned"):
             msg += f"因子保留(清{r.get('days_removed')}天/{r['pruned']}行) "
+        e0 = prune_empty_factors()
+        if e0.get("removed"):
+            msg += f"空壳清理({e0['removed']}) "
     except Exception as e:
         msg += f"因子保留:{e} "
 

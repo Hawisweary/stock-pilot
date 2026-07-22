@@ -52,6 +52,7 @@ def merge_factors_equal(factor_ids: List[str], name: str) -> dict:
     ).fetchone()
     if merged_id:
         out_id = merged_id[0]
+        created_new = False
     else:
         max_row = conn.execute(
             "SELECT MAX(CAST(SUBSTR(factor_id,2) AS INTEGER)) FROM factor_registry WHERE factor_id LIKE 'F%'"
@@ -62,6 +63,7 @@ def merge_factors_equal(factor_ids: List[str], name: str) -> dict:
             "INSERT INTO factor_registry (factor_id, name, category, formula) VALUES (?,?,?,?)",
             (out_id, name, "合成", f"equal({','.join(factor_ids)})"),
         )
+        created_new = True
 
     count = 0
     for (sid,) in stocks:
@@ -77,6 +79,13 @@ def merge_factors_equal(factor_ids: List[str], name: str) -> dict:
             merged = sum(vals) / len(vals)
             _upsert_factor(conn, sid, latest, out_id, merged)
             count += 1
+
+    # 空壳防护:本次新建但无任何值写入 → 删掉注册孤儿(输入因子当日无数据)
+    if count == 0 and created_new:
+        conn.execute("DELETE FROM factor_registry WHERE factor_id=?", (out_id,))
+        conn.commit()
+        conn.close()
+        return {"error": "合成结果为空(输入因子当日无数据),未创建因子"}
 
     meta = {
         "method": "equal",
@@ -148,6 +157,12 @@ def merge_factors_rolling_optimal(factor_ids: List[str], name: str, window: int 
             _upsert_factor(conn, sid, latest, out_id, merged / w_sum)
             count += 1
 
+    if count == 0:
+        conn.execute("DELETE FROM factor_registry WHERE factor_id=?", (out_id,))
+        conn.commit()
+        conn.close()
+        return {"error": "合成结果为空(输入因子当日无数据),未创建因子"}
+
     meta = {"method": "rolling_optimal", "inputs": factor_ids, "weights": weights, "window": window, "date": latest}
     conn.execute(
         "UPDATE factor_registry SET formula=? WHERE factor_id=?",
@@ -207,6 +222,12 @@ def merge_factors_ic_ir(factor_ids: List[str], name: str, forward_days: int = 20
         if w_sum > 0:
             _upsert_factor(conn, sid, latest, out_id, merged / w_sum)
             count += 1
+
+    if count == 0:
+        conn.execute("DELETE FROM factor_registry WHERE factor_id=?", (out_id,))
+        conn.commit()
+        conn.close()
+        return {"error": "合成结果为空(输入因子当日无数据),未创建因子"}
 
     meta = {"method": "ic_ir", "inputs": factor_ids, "weights": weights, "date": latest}
     conn.execute(

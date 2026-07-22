@@ -61,3 +61,26 @@ def prune_factor_values(keep_days: int | None = None) -> dict:
         return {"pruned": total, "days_removed": len(old_dates), "cutoff": cutoff_date, "keep_days": keep_days}
     finally:
         conn.close()
+
+
+def prune_empty_factors() -> dict:
+    """清理注册了但完全无 factor_values 的空壳因子(合成守卫的兜底)。"""
+    conn = sqlite3.connect(DB_PATH, timeout=60)
+    try:
+        conn.execute("PRAGMA busy_timeout=60000")
+        orphans = [
+            r[0]
+            for r in conn.execute(
+                """SELECT r.factor_id FROM factor_registry r
+                   LEFT JOIN factor_values v ON v.factor_id = r.factor_id
+                   GROUP BY r.factor_id HAVING COUNT(v.factor_id) = 0"""
+            ).fetchall()
+        ]
+        for fid in orphans:
+            conn.execute("DELETE FROM factor_registry WHERE factor_id=?", (fid,))
+        conn.commit()
+        if orphans:
+            logger.info("[Retention] 清理空壳因子: %s", orphans)
+        return {"removed": len(orphans), "factor_ids": orphans}
+    finally:
+        conn.close()
