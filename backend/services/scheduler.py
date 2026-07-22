@@ -399,6 +399,15 @@ def run_daily_tasks():
         msg += f"因子历史:{e} "
 
     try:
+        from services.factor_retention import prune_factor_values
+
+        r = prune_factor_values()
+        if r.get("pruned"):
+            msg += f"因子保留(清{r.get('days_removed')}天/{r['pruned']}行) "
+    except Exception as e:
+        msg += f"因子保留:{e} "
+
+    try:
         from services.financial_backfill import backfill_interest_coverage
 
         r = backfill_interest_coverage()
