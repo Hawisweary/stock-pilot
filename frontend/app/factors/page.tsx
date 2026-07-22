@@ -80,7 +80,20 @@ function FactorsLabInner() {
       api.factorIcHeatmap(60).then(setHeatmap).catch(() => {});
     }
     if (tab === "correlation") api.factorCorrelation().then(setCorr).catch(() => {});
-    if (tab === "decay" && selected) api.factorDecay(selected, forwardDays).then(setDecay).catch(() => setDecay(null));
+    if (tab === "decay" && selected) {
+      let tries = 0;
+      const fetchDecay = () => {
+        api.factorDecay(selected, forwardDays).then((d) => {
+          setDecay(d);
+          // pending: 后台子进程正在算(~18s),轮询直到出结果
+          if ((d as { pending?: boolean })?.pending && tries < 10) {
+            tries++;
+            setTimeout(fetchDecay, 4000);
+          }
+        }).catch(() => setDecay(null));
+      };
+      fetchDecay();
+    }
     if (tab === "merge") {
       api.icReview().then(setIcReview).catch(() => setIcReview(null));
       api.factorCombinationsList().then((d) => setCombinations(d.combinations || [])).catch(() => {});
@@ -618,7 +631,9 @@ function FactorsLabInner() {
                   </table>
                 </div>
               );
-            })() : selected ? (
+            })() : (decay as { pending?: boolean })?.pending ? (
+              <p className="text-muted-foreground">衰减分析后台计算中(约 20 秒），完成后自动显示…</p>
+            ) : selected ? (
               <p>加载中…</p>
             ) : (
               <p>请选择因子</p>

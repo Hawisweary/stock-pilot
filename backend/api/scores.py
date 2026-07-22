@@ -700,10 +700,21 @@ async def compute_factors_endpoint(
 
 
 @router.get("/factors/{factor_id}/decay")
-async def factor_decay(factor_id: str, forward_days: int = 20):
-    from services.ic_engine import analyze_factor_decay
+def factor_decay(factor_id: str, forward_days: int = 20):
+    """IC 衰减(18s CPU密集)按数据日期缓存;未命中不在API进程算,触发子进程后返回 pending。"""
+    import os as _os, subprocess as _sp, sys as _sys
+    from services.factor_analysis_cache import cached_by_date
 
-    return analyze_factor_decay(factor_id, forward_days=forward_days)
+    key = f"decay:{factor_id}:{forward_days}"
+    r = cached_by_date(key, lambda: None, allow_inprocess=False)
+    if r.get("pending"):
+        try:
+            _warm = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "scripts", "run_scheduled_job.py")
+            _sp.Popen([_sys.executable, _warm, "warm_decay", "--factor", factor_id, "--fd", str(forward_days)],
+                      stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+        except Exception:
+            pass
+    return r
 
 
 class FactorMergeRequest(BaseModel):

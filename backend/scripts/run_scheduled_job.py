@@ -16,7 +16,9 @@ logging.basicConfig(level=logging.INFO)
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("job", choices=["nightly", "weekly", "daily", "technical_retry", "warm_cache"])
+    parser.add_argument("job", choices=["nightly", "weekly", "daily", "technical_retry", "warm_cache", "warm_decay"])
+    parser.add_argument("--factor", default=None, help="warm_decay: 因子ID")
+    parser.add_argument("--fd", type=int, default=20, help="warm_decay: 未来收益天数")
     args = parser.parse_args()
 
     # 跨进程互斥：同类作业全系统只允许一个实例（防调度误触发/保活风暴导致重复发射）
@@ -55,6 +57,16 @@ def main() -> int:
         get_beta_health(force=True)
         warm_ic_tabs()
         summary = "beta-health + IC tabs 已预热"
+    elif args.job == "warm_decay":
+        # 针对单因子的 IC 衰减(18s CPU密集),按需在子进程计算并落缓存
+        from services.factor_analysis_cache import cached_by_date, latest_any_factor_date, store
+        from services.ic_engine import analyze_factor_decay
+
+        key = f"decay:{args.factor}:{args.fd}"
+        res = analyze_factor_decay(args.factor, forward_days=args.fd)
+        if isinstance(res, dict) and not res.get("error"):
+            store(key, 0, latest_any_factor_date(), res)
+        summary = f"decay {args.factor}/{args.fd} 已缓存"
     else:  # daily
         from services.scheduler import run_daily_tasks
 
