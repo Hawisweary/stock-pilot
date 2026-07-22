@@ -855,6 +855,7 @@ export const api = {
     request<import("@/types/beta").IcHeatmap>(`/strategy/factor-ic/heatmap?period=${period}`),
 
   factorsList: () => request<{ factors: Record<string, unknown>[] }>("/factors/list"),
+  factorsHealth: () => request<{ factors: Record<string, { status: string; mean_ic: number | null; ir: number | null; significance: string | null }>; decayed_count: number; total: number }>("/factors/health"),
 
   factorAnalysis: (factorId: string, forwardDays = 20) =>
     request<Record<string, unknown>>(`/factors/${factorId}/analysis?forward_days=${forwardDays}`),

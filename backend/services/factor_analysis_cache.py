@@ -105,6 +105,47 @@ def compute_and_cache(factor_id: str, forward_days: int = 20) -> dict:
     return result
 
 
+def _health_status(mean_ic, ir, sig) -> str:
+    """由 IC/IR/显著性判定因子健康度: strong(有效) / weak(边际) / decayed(失效)。"""
+    if mean_ic is None:
+        return "unknown"
+    mic = abs(float(mean_ic))
+    ric = abs(float(ir or 0))
+    stars = (sig or {}).get("significance", "") if isinstance(sig, dict) else ""
+    significant = bool(stars) and stars in ("*", "**", "***")
+    if not significant and mic < 0.015:
+        return "decayed"       # 无显著性且IC接近0 → 失效
+    if ric < 0.15 or (not significant) or mic < 0.02:
+        return "weak"          # IR低/边际显著 → 减弱
+    return "strong"
+
+
+def factor_health_all(forward_days: int = 20) -> dict:
+    """全部注册因子的健康度(读缓存,快)。用于因子库标色/衰减告警。"""
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    try:
+        fids = [r[0] for r in conn.execute("SELECT factor_id FROM factor_registry ORDER BY factor_id")]
+    finally:
+        conn.close()
+    out = {}
+    n_decayed = 0
+    for fid in fids:
+        r = get_cached(fid, forward_days, latest_factor_date(fid))
+        if not r or r.get("error"):
+            out[fid] = {"status": "unknown", "mean_ic": None, "ir": None}
+            continue
+        st = _health_status(r.get("mean_ic"), r.get("ir"), r.get("ic_significance"))
+        if st == "decayed":
+            n_decayed += 1
+        out[fid] = {
+            "status": st,
+            "mean_ic": r.get("mean_ic"),
+            "ir": r.get("ir"),
+            "significance": (r.get("ic_significance") or {}).get("significance"),
+        }
+    return {"factors": out, "decayed_count": n_decayed, "total": len(fids)}
+
+
 def warm_ic_tabs(forward_days: int = 20) -> None:
     """只预热 IC tab 的三个慢端点(IC汇总/热力图/相关矩阵),启动时后台调用。"""
     from services.custom_factor import factor_correlation_matrix

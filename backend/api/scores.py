@@ -603,6 +603,14 @@ async def factor_list():
     return {"factors": factors}
 
 
+@router.get("/factors/health")
+def factors_health():
+    """全部因子健康度(IC/IR判定 strong/weak/decayed),用于因子库标色+衰减告警。读缓存。"""
+    from services.factor_analysis_cache import factor_health_all
+
+    return factor_health_all()
+
+
 @router.get("/factors/quality/status")
 async def factor_quality_status():
     """S0 因子数据质量状态（生命周期/披露日历/宽表）"""

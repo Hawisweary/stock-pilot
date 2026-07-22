@@ -18,6 +18,11 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
       "port": 3002
+    },
+    {
+      "name": "guandan",
+      "url": "http://127.0.0.1:5174",
+      "port": 5174
     }
   ]
 }

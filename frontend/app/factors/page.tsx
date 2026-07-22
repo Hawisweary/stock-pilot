@@ -53,6 +53,8 @@ function FactorsLabInner() {
   const [mlEnabled, setMlEnabled] = useState(false);
   const [mlTraining, setMlTraining] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [health, setHealth] = useState<Record<string, { status: string; mean_ic: number | null; ir: number | null }>>({});
+  const [decayedCount, setDecayedCount] = useState(0);
 
   const loadFactors = () => {
     setLoadError(false);
@@ -60,9 +62,17 @@ function FactorsLabInner() {
       .then((d) => setFactors(d.factors || []))
       .catch(() => setLoadError(true));
     api.customFactorsList().then((d) => setCustomList(d.factors || [])).catch(() => {});
+    api.factorsHealth().then((d) => { setHealth(d.factors || {}); setDecayedCount(d.decayed_count || 0); }).catch(() => {});
   };
 
   useEffect(() => { loadFactors(); }, []);
+
+  const HEALTH_COLOR: Record<string, string> = {
+    strong: "bg-green-500", weak: "bg-amber-400", decayed: "bg-red-500", unknown: "bg-gray-300",
+  };
+  const HEALTH_LABEL: Record<string, string> = {
+    strong: "有效(显著IC)", weak: "减弱(边际)", decayed: "已衰减(IC失效)", unknown: "样本不足",
+  };
 
   useEffect(() => {
     if (tab === "ic") {
@@ -260,15 +270,35 @@ function FactorsLabInner() {
           {!loadError && factors.length === 0 && (
             <p className="text-xs text-muted-foreground py-2">加载中…</p>
           )}
+          {/* 因子衰减告警 + 图例 */}
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground flex-wrap gap-2">
+            <div className="flex items-center gap-3">
+              {(["strong", "weak", "decayed", "unknown"] as const).map((s) => (
+                <span key={s} className="flex items-center gap-1">
+                  <span className={`inline-block w-2 h-2 rounded-full ${HEALTH_COLOR[s]}`} />
+                  {HEALTH_LABEL[s]}
+                </span>
+              ))}
+            </div>
+            {decayedCount > 0 && (
+              <span className="text-red-600 font-medium">⚠️ {decayedCount} 个因子已衰减</span>
+            )}
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-            {factors.map((f) => (
+            {factors.map((f) => {
+              const st = health[f.factor_id as string]?.status || "unknown";
+              return (
               <button key={f.factor_id as string} onClick={() => selectFactor(f.factor_id as string)}
-                title={factorDescription(f)}
+                title={`${factorDescription(f)}\n\n有效性: ${HEALTH_LABEL[st]}${health[f.factor_id as string]?.mean_ic != null ? ` (IC ${health[f.factor_id as string]?.mean_ic}, IR ${health[f.factor_id as string]?.ir})` : ""}`}
                 className={`text-left p-2 rounded border text-xs ${selected === f.factor_id ? "border-primary ring-1" : ""}`}>
-                <div className="font-mono text-muted-foreground">{f.factor_id as string}</div>
+                <div className="flex items-center justify-between">
+                  <div className="font-mono text-muted-foreground">{f.factor_id as string}</div>
+                  <span className={`inline-block w-2 h-2 rounded-full ${HEALTH_COLOR[st]}`} />
+                </div>
                 <div className="font-bold">{f.name as string}</div>
               </button>
-            ))}
+              );
+            })}
           </div>
           {factor && (
             <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
