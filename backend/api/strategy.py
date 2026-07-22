@@ -17,14 +17,19 @@ async def list_strategies(portfolio_only: bool = Query(False)):
 
 
 @router.get("/factor-ic")
-async def factor_ic_analysis(
+def factor_ic_analysis(
     period: int = Query(60, description="IC 序列最多保留期数"),
     forward_days: int = Query(20, description="未来收益天数"),
 ):
-    """因子有效性(IC) — 因子分 vs 未来 N 日股票收益"""
+    """因子有效性(IC) — 因子分 vs 未来 N 日股票收益（按数据日期缓存，避免每次45s全算）"""
+    from services.factor_analysis_cache import cached_by_date
     from services.ic_engine import analyze_all_score_factors
 
-    return analyze_all_score_factors(forward_days=forward_days, period=period)
+    return cached_by_date(
+        f"ic:all:{period}:{forward_days}",
+        lambda: analyze_all_score_factors(forward_days=forward_days, period=period),
+        allow_inprocess=False,
+    )
 
 
 def _pearson(x, y):
@@ -39,11 +44,14 @@ def _pearson(x, y):
 
 
 @router.get("/factor-ic/heatmap")
-async def factor_ic_heatmap(period: int = Query(60)):
-    from services.ic_engine import analyze_ic_heatmap
+def factor_ic_heatmap(period: int = Query(60)):
     from services.beta_health import attach_meta
+    from services.factor_analysis_cache import cached_by_date
+    from services.ic_engine import analyze_ic_heatmap
 
-    return attach_meta(analyze_ic_heatmap(period=period))
+    return attach_meta(
+        cached_by_date(f"ic:heatmap:{period}", lambda: analyze_ic_heatmap(period=period), allow_inprocess=False)
+    )
 
 
 @router.get("/rolling-backtest")

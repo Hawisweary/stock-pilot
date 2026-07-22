@@ -786,11 +786,12 @@ async def factor_merge_api(req: FactorMergeRequest):
 
 
 @router.get("/factors/correlation")
-async def factor_correlation():
-    from services.custom_factor import factor_correlation_matrix
+def factor_correlation():
     from services.beta_health import attach_meta
+    from services.custom_factor import factor_correlation_matrix
+    from services.factor_analysis_cache import cached_by_date
 
-    return attach_meta(factor_correlation_matrix())
+    return attach_meta(cached_by_date("factor:correlation", factor_correlation_matrix, allow_inprocess=False))
 
 
 @router.get("/factors/custom")

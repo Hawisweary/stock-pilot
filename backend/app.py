@@ -179,12 +179,15 @@ async def lifespan(app: FastAPI):
     # 旧版 fetch-recalc 循环已下线：18:00 逐股抓取(eastmoney已封、每股1.5s约2.2小时)
     # 与周一重算均被 15:30 每日流水线覆盖
     _scheduler_state["note"] = "legacy loop disabled; see services/scheduler.py"
-    # 后台预热 beta-health 缓存(内部重聚合 20s+,预热后页面首次加载不阻塞)
+    # 预热 beta-health + IC tab 缓存(内部聚合/IC计算 20~49s 且CPU密集)——
+    # 走独立子进程(自带GIL),绝不阻塞 API 进程事件循环
     try:
-        from services.beta_health import warm_beta_health
-        warm_beta_health()
+        import os as _os, sys as _sys, subprocess as _sp
+        _warm = _os.path.join(_os.path.dirname(__file__), "scripts", "run_scheduled_job.py")
+        _sp.Popen([_sys.executable, _warm, "warm_cache"],
+                  stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
     except Exception as e:
-        print(f"[App] beta-health 预热跳过: {e}")
+        print(f"[App] 缓存预热子进程跳过: {e}")
     try:
         from services.score_health_monitor import start_monitor_daemon
 

@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("job", choices=["nightly", "weekly", "daily", "technical_retry"])
+    parser.add_argument("job", choices=["nightly", "weekly", "daily", "technical_retry", "warm_cache"])
     args = parser.parse_args()
 
     # 跨进程互斥：同类作业全系统只允许一个实例（防调度误触发/保活风暴导致重复发射）
@@ -47,6 +47,14 @@ def main() -> int:
 
         r = retry_technical_no_source()
         summary = str(r)[:300]
+    elif args.job == "warm_cache":
+        # 预热 beta-health + IC tab 缓存(CPU密集,独立进程跑不阻塞 API)
+        from services.beta_health import get_beta_health
+        from services.factor_analysis_cache import warm_ic_tabs
+
+        get_beta_health(force=True)
+        warm_ic_tabs()
+        summary = "beta-health + IC tabs 已预热"
     else:  # daily
         from services.scheduler import run_daily_tasks
 

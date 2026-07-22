@@ -21,6 +21,36 @@ def latest_factor_date(factor_id: str) -> str:
         conn.close()
 
 
+def latest_any_factor_date() -> str:
+    """全表最新因子数据日期(用于 IC汇总/热力图/相关矩阵 这类跨因子分析的缓存失效键)。"""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute("SELECT MAX(date) FROM factor_values").fetchone()
+        return row[0] or ""
+    finally:
+        conn.close()
+
+
+def cached_by_date(key: str, compute_fn, *, allow_inprocess: bool = True) -> dict:
+    """通用:按'全市场最新因子数据日期'缓存跨因子的重计算(IC汇总/热力图/相关矩阵)。
+
+    复用 factor_analysis_cache 表:factor_id=key, forward_days=0。数据日期不变直接命中。
+    allow_inprocess=False 时,缓存未命中不在本进程计算(IC 计算 CPU 密集会因 GIL
+    冻结 API),而是返回 {"pending": True} 由子进程(启动/每日预热)填充,避免阻塞。
+    计算结果为空或含 error 时不落缓存。
+    """
+    data_date = latest_any_factor_date()
+    hit = get_cached(key, 0, data_date)
+    if hit is not None:
+        return hit
+    if not allow_inprocess:
+        return {"pending": True, "message": "分析正在后台计算，请稍后刷新", "data_date": data_date}
+    result = compute_fn()
+    if isinstance(result, dict) and not result.get("error"):
+        store(key, 0, data_date, result)
+    return result
+
+
 def get_cached(factor_id: str, forward_days: int, data_date: str) -> dict | None:
     """数据日期一致才命中。"""
     from database import cache_connect
@@ -75,6 +105,22 @@ def compute_and_cache(factor_id: str, forward_days: int = 20) -> dict:
     return result
 
 
+def warm_ic_tabs(forward_days: int = 20) -> None:
+    """只预热 IC tab 的三个慢端点(IC汇总/热力图/相关矩阵),启动时后台调用。"""
+    from services.custom_factor import factor_correlation_matrix
+    from services.ic_engine import analyze_all_score_factors, analyze_ic_heatmap
+
+    for key, fn in (
+        (f"ic:all:60:{forward_days}", lambda: analyze_all_score_factors(forward_days=forward_days, period=60)),
+        ("ic:heatmap:60", lambda: analyze_ic_heatmap(period=60)),
+        ("factor:correlation", factor_correlation_matrix),
+    ):
+        try:
+            cached_by_date(key, fn)
+        except Exception as e:
+            logger.warning("IC tab 预热失败 %s: %s", key, e)
+
+
 def warm_all(forward_days: int = 20) -> dict:
     """预热全部注册因子的默认分析(每日流水线末尾调用)。"""
     conn = sqlite3.connect(DB_PATH)
@@ -97,4 +143,24 @@ def warm_all(forward_days: int = 20) -> dict:
         except Exception as e:
             errors += 1
             logger.warning("因子分析预热失败 %s: %s", fid, e)
-    return {"warmed": warmed, "errors": errors, "total": len(fids)}
+
+    # 预热 IC tab 的跨因子分析(IC汇总/热力图/相关矩阵),这些单次 12~45s
+    ic_warmed = 0
+    try:
+        from services.custom_factor import factor_correlation_matrix
+        from services.ic_engine import analyze_all_score_factors, analyze_ic_heatmap
+
+        for key, fn in (
+            (f"ic:all:60:{forward_days}", lambda: analyze_all_score_factors(forward_days=forward_days, period=60)),
+            ("ic:heatmap:60", lambda: analyze_ic_heatmap(period=60)),
+            ("factor:correlation", factor_correlation_matrix),
+        ):
+            try:
+                cached_by_date(key, fn)
+                ic_warmed += 1
+            except Exception as e:
+                logger.warning("IC分析预热失败 %s: %s", key, e)
+    except Exception as e:
+        logger.warning("IC分析预热跳过: %s", e)
+
+    return {"warmed": warmed, "errors": errors, "total": len(fids), "ic_warmed": ic_warmed}
