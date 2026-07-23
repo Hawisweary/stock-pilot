@@ -11,6 +11,18 @@ class TrainRequest(BaseModel):
     model: str = "lightgbm"
     forward_days: int | None = None
     horizons: list[int] | None = None
+    walkforward: bool | None = True
+    wf_max_folds: int | None = 24
+    wf_train_window_days: int | None = None
+    wf_step_days: int | None = None
+    timeout_sec: int = 3600
+
+
+@router.get("/train-status")
+async def qlib_train_status(horizon: int | None = Query(None)):
+    from services.ml_predictions import get_ml_train_status
+
+    return get_ml_train_status(horizon=horizon)
 
 
 @router.get("/predictions")
@@ -18,17 +30,20 @@ async def list_predictions(
     limit: int = Query(10),
     horizon: int | None = Query(None, description="预测周期交易日，默认 20"),
 ):
-    from config import ML_DEFAULT_HORIZON, ML_HORIZONS, QLIB_ENABLED, QLIB_PREDICTIONS_APPROVED
-    from services.ml_predictions import get_latest_predictions, list_ml_horizons
+    from config import ML_DEFAULT_HORIZON, ML_HORIZONS, QLIB_ENABLED
+    from services.ml_gate import ml_predictions_gate_status
+    from services.ml_predictions import get_latest_predictions, get_ml_train_status, list_ml_horizons
 
-    if not QLIB_ENABLED and not QLIB_PREDICTIONS_APPROVED:
-        return {"enabled": False, "predictions": [], "note": "AFR_QLIB_ENABLED=false"}
+    gate = ml_predictions_gate_status()
     h = horizon if horizon is not None else ML_DEFAULT_HORIZON
     return {
-        "enabled": True,
+        "enabled": QLIB_ENABLED,
         "horizon": h,
         "horizons_available": list(ML_HORIZONS),
         "horizon_status": list_ml_horizons(),
+        "validation": get_ml_train_status(horizon=h),
+        "gate": gate,
+        "predictions_approved": gate["approved"],
         "predictions": get_latest_predictions(limit=limit, horizon=h),
     }
 
@@ -40,7 +55,7 @@ async def train_qlib(req: TrainRequest = TrainRequest()):
 
     if not QLIB_ENABLED:
         return {"error": "AFR_QLIB_ENABLED=false", "status": "rejected"}
-    job = enqueue("qlib_train", req.model_dump())
+    job = enqueue("qlib_train", req.model_dump(exclude_none=True))
     return {"job_id": job.id, "status": job.status.value}
 
 

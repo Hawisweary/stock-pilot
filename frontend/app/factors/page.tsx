@@ -19,6 +19,15 @@ import { factorDescription } from "@/lib/factorDescriptions";
 const IC_LABELS = V5_IC_LABELS;
 const SCORE_TO_STRATEGY = V5_IC_TO_STRATEGY;
 
+const ML_SCORE_DISCLAIMER =
+  "该分数为实验性排序信号，未经样本外周期验证，不构成投资建议，请结合 V5 综合判断。非 demo 版本亦不代表已通过有效性验证。";
+
+function mlRowIsDemo(p: Record<string, unknown>): boolean {
+  if (typeof p.is_demo === "boolean") return p.is_demo;
+  const mv = String(p.model_version ?? "");
+  return mv.startsWith("demo_");
+}
+
 function FactorsLabInner() {
   const toast = useToast();
   const router = useRouter();
@@ -50,6 +59,7 @@ function FactorsLabInner() {
   const [gpRunning, setGpRunning] = useState(false);
   const [gpWinners, setGpWinners] = useState<Record<string, unknown>[]>([]);
   const [mlPreds, setMlPreds] = useState<Record<string, unknown>[]>([]);
+  const [mlValidation, setMlValidation] = useState<Record<string, unknown> | null>(null);
   const [mlEnabled, setMlEnabled] = useState(false);
   const [mlTraining, setMlTraining] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -102,6 +112,7 @@ function FactorsLabInner() {
       api.qlibPredictions(30).then((r) => {
         setMlEnabled(!!r.enabled);
         setMlPreds(r.predictions || []);
+        setMlValidation((r.validation as Record<string, unknown>) || null);
       }).catch(() => {});
     }
     if (tab === "gp") {
@@ -551,17 +562,68 @@ function FactorsLabInner() {
               {mlTraining ? "提交中…" : "触发训练"}
             </button>
             {!mlEnabled && <p className="text-muted-foreground">AFR_QLIB_ENABLED=false</p>}
+            {mlValidation?.has_runs && (
+              <p className="text-[10px] text-muted-foreground">
+                近窗验证 RankIC（均值）：
+                <span className="font-mono font-semibold text-foreground">
+                  {mlValidation.recent_mean_rank_ic != null ? String(mlValidation.recent_mean_rank_ic) : "—"}
+                </span>
+                {mlValidation.recent_rank_ic_std != null && (
+                  <> · σ={String(mlValidation.recent_rank_ic_std)}</>
+                )}
+                {" · "}
+                门控：
+                <span className={mlValidation.predictions_approved ? "text-green-700 font-semibold" : "text-amber-700"}>
+                  {(mlValidation.gate as { approved?: boolean })?.approved ? "已放行" : "未放行（仅展示）"}
+                </span>
+                {" · "}
+                状态：{String(mlValidation.validation_status ?? "experimental")}
+                {mlValidation.latest_run && typeof mlValidation.latest_run === "object" && (
+                  <>
+                    {" · "}
+                    最近折 {String((mlValidation.latest_run as { test_window?: string }).test_window ?? "")}
+                  </>
+                )}
+              </p>
+            )}
+            {mlValidation && !mlValidation.has_runs && (
+              <p className="text-[10px] text-amber-700">尚无 Walk-Forward 验证记录；触发训练（H20 WF）后此处显示 OOS RankIC。</p>
+            )}
+            <p className="text-[10px] text-muted-foreground leading-snug">{ML_SCORE_DISCLAIMER}</p>
             <table className="w-full">
-              <thead><tr><th className="text-left p-1">代码</th><th className="text-left p-1">名称</th><th className="text-right p-1">ML分</th><th className="text-right p-1">V5分</th></tr></thead>
+              <thead>
+                <tr>
+                  <th className="text-left p-1">代码</th>
+                  <th className="text-left p-1">名称</th>
+                  <th className="text-right p-1" title={ML_SCORE_DISCLAIMER}>ML分</th>
+                  <th className="text-left p-1">版本</th>
+                  <th className="text-right p-1">V5分</th>
+                </tr>
+              </thead>
               <tbody>
-                {mlPreds.map((p) => (
-                  <tr key={String(p.code)} className="border-t">
-                    <td className="p-1 font-mono">{String(p.code)}</td>
-                    <td className="p-1">{String(p.name)}</td>
-                    <td className="p-1 text-right font-bold">{Number(p.score).toFixed(1)}</td>
-                    <td className="p-1 text-right text-blue-700">{p.composite_v5 != null ? Number(p.composite_v5).toFixed(1) : "—"}</td>
-                  </tr>
-                ))}
+                {mlPreds.map((p) => {
+                  const demo = mlRowIsDemo(p);
+                  const mv = p.model_version != null ? String(p.model_version) : "—";
+                  return (
+                    <tr key={String(p.code)} className="border-t">
+                      <td className="p-1 font-mono">{String(p.code)}</td>
+                      <td className="p-1">{String(p.name)}</td>
+                      <td
+                        className={`p-1 text-right font-bold ${demo ? "bg-muted/60 border border-dashed border-muted-foreground/40 rounded" : ""}`}
+                        title={ML_SCORE_DISCLAIMER}
+                      >
+                        {Number(p.score).toFixed(1)}
+                        {demo && (
+                          <span className="ml-1 text-[9px] font-normal text-muted-foreground align-middle">Demo</span>
+                        )}
+                      </td>
+                      <td className="p-1 font-mono text-[10px] text-muted-foreground truncate max-w-[7rem]" title={mv}>
+                        {mv}
+                      </td>
+                      <td className="p-1 text-right text-blue-700">{p.composite_v5 != null ? Number(p.composite_v5).toFixed(1) : "—"}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             {mlPreds.length > 1 && mlPreds.some((p) => p.composite_v5 != null) && (() => {

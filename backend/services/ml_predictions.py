@@ -13,8 +13,10 @@ from config import (
     DB_PATH,
     ML_DEFAULT_HORIZON,
     ML_HORIZONS,
+    ML_GATE_MIN_FOLDS,
+    ML_GATE_MIN_MEAN_RANK_IC,
+    ML_GATE_RECENT_FOLDS,
     QLIB_ENABLED,
-    QLIB_PREDICTIONS_APPROVED,
     QUANT_WORKERS_DIR,
     VENV_QUANT_PYTHON,
 )
@@ -22,6 +24,35 @@ from config import (
 
 def model_version_for_horizon(forward_days: int, mode: str = "lightgbm") -> str:
     return f"{mode}_h{forward_days}"
+
+
+def is_demo_model_version(model_version: str | None) -> bool:
+    """demo / seed 写入的预测，非 LightGBM/Ridge 训练产物。"""
+    return bool(model_version and str(model_version).startswith("demo_"))
+
+
+def resolve_model_version_for_horizon(
+    conn: sqlite3.Connection,
+    horizon: int,
+) -> str | None:
+    """优先 WF live 模型，其次 legacy lightgbm/ridge，最后 demo。"""
+    patterns = [
+        f"%_h{horizon}_wf_live",
+        f"lightgbm_h{horizon}_wf_v1",
+        f"ridge_h{horizon}_wf_v1",
+        f"lightgbm_h{horizon}",
+        f"ridge_h{horizon}",
+        f"demo_h{horizon}",
+    ]
+    for pat in patterns:
+        row = conn.execute(
+            """SELECT model_version FROM ml_predictions
+               WHERE model_version LIKE ? ORDER BY pred_date DESC LIMIT 1""",
+            (pat,),
+        ).fetchone()
+        if row:
+            return str(row[0])
+    return None
 
 
 def ensure_ml_tables(conn: sqlite3.Connection) -> None:
@@ -43,13 +74,11 @@ def get_latest_predictions(
     *,
     horizon: Optional[int] = None,
 ) -> list[dict]:
-    if not QLIB_PREDICTIONS_APPROVED:
-        return []
     h = horizon if horizon is not None else ML_DEFAULT_HORIZON
-    mv = model_version_for_horizon(h)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     ensure_ml_tables(conn)
+    mv = resolve_model_version_for_horizon(conn, h) or model_version_for_horizon(h)
     dt = pred_date or conn.execute(
         "SELECT MAX(pred_date) FROM ml_predictions WHERE model_version=?",
         (mv,),
@@ -71,13 +100,17 @@ def get_latest_predictions(
         (dt, mv, limit),
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        row = dict(r)
+        mv = row.get("model_version")
+        row["is_demo"] = is_demo_model_version(mv)
+        out.append(row)
+    return out
 
 
 def list_ml_horizons(pred_date: Optional[str] = None) -> list[dict]:
     """各 horizon 最新预测日及样本数。"""
-    if not QLIB_PREDICTIONS_APPROVED:
-        return []
     conn = sqlite3.connect(DB_PATH)
     ensure_ml_tables(conn)
     out = []
@@ -107,13 +140,15 @@ def load_prediction_scores(
     horizon: Optional[int] = None,
 ) -> dict[str, float]:
     """code -> score，供 ml_pred 回测"""
-    if not QLIB_PREDICTIONS_APPROVED:
+    from services.ml_gate import is_ml_predictions_approved
+
+    if not is_ml_predictions_approved(horizon=horizon):
         return {}
     h = horizon if horizon is not None else ML_DEFAULT_HORIZON
-    mv = model_version_for_horizon(h)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     ensure_ml_tables(conn)
+    mv = resolve_model_version_for_horizon(conn, h) or model_version_for_horizon(h)
     rows = conn.execute(
         """SELECT s.code, mp.score FROM ml_predictions mp
            JOIN stocks s ON mp.stock_id=s.id
@@ -190,9 +225,11 @@ def sync_ml_to_comprehensive(
     horizon: Optional[int] = None,
 ) -> dict:
     """将指定 horizon 的 ML 预测分混入 composite_score"""
+    from services.ml_gate import is_ml_predictions_approved
+
     path = db_path or DB_PATH
-    if not QLIB_PREDICTIONS_APPROVED:
-        return {"error": "AFR_QLIB_PREDICTIONS_APPROVED=false", "updated": 0}
+    if not is_ml_predictions_approved(path, horizon=horizon):
+        return {"error": "ml_metric_gate_not_passed", "updated": 0}
 
     h = horizon if horizon is not None else ML_DEFAULT_HORIZON
     mv = model_version_for_horizon(h)
@@ -252,3 +289,22 @@ def sync_ml_to_comprehensive(
         "horizon": h,
         "model_version": mv,
     }
+
+
+def get_ml_train_status(horizon: int | None = None) -> dict:
+    from config import ML_DEFAULT_HORIZON
+    from services.ml_gate import ml_predictions_gate_status
+    from services.ml_train_store import get_validation_summary
+
+    h = horizon if horizon is not None else ML_DEFAULT_HORIZON
+    summary = get_validation_summary(
+        DB_PATH,
+        horizon=h,
+        recent_windows=ML_GATE_RECENT_FOLDS,
+        rank_ic_threshold=ML_GATE_MIN_MEAN_RANK_IC,
+        min_folds=ML_GATE_MIN_FOLDS,
+    )
+    gate = ml_predictions_gate_status(DB_PATH, horizon=h)
+    summary["gate"] = gate
+    summary["predictions_approved"] = gate["approved"]
+    return summary

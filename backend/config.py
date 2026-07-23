@@ -133,7 +133,19 @@ P2_PARALLEL_ENABLED = env_bool("AFR_P2_PARALLEL", True)
 JOB_STALE_TIMEOUT_MIN = int(os.getenv("AFR_JOB_STALE_TIMEOUT_MIN", "10"))
 QLIB_ENABLED = env_bool("AFR_QLIB_ENABLED", False)
 RUST_BACKTEST_APPROVED = env_bool("AFR_RUST_BACKTEST_APPROVED", False)
-QLIB_PREDICTIONS_APPROVED = env_bool("AFR_QLIB_PREDICTIONS_APPROVED", False)
+# ML 预测消费：未设置 env 时走 OOS RankIC 指标门控（见 services/ml_gate.py）
+_qlib_pred_raw = os.getenv("AFR_QLIB_PREDICTIONS_APPROVED")
+if _qlib_pred_raw is None or str(_qlib_pred_raw).strip() == "":
+    QLIB_PREDICTIONS_APPROVED_FORCE = None  # type: bool | None
+else:
+    QLIB_PREDICTIONS_APPROVED_FORCE = env_bool("AFR_QLIB_PREDICTIONS_APPROVED", False)
+# 兼容旧代码引用（仅表示 env 是否强制 true；实际放行请用 is_ml_predictions_approved()）
+QLIB_PREDICTIONS_APPROVED = QLIB_PREDICTIONS_APPROVED_FORCE is True
+ML_GATE_RECENT_FOLDS = int(os.getenv("AFR_ML_GATE_RECENT_FOLDS", "5"))
+ML_GATE_MIN_FOLDS = int(os.getenv("AFR_ML_GATE_MIN_FOLDS", "3"))
+ML_GATE_MIN_MEAN_RANK_IC = float(os.getenv("AFR_ML_GATE_MIN_RANK_IC", "0.02"))
+_ml_gate_max_std = os.getenv("AFR_ML_GATE_MAX_RANK_IC_STD", "").strip()
+ML_GATE_MAX_RANK_IC_STD = float(_ml_gate_max_std) if _ml_gate_max_std else None
 # ML 多 horizon 独立模型（方案 A）：5/20/60 日未来收益
 ML_HORIZONS = tuple(
     int(x) for x in os.getenv("AFR_ML_HORIZONS", "5,20,60").split(",") if x.strip().isdigit()

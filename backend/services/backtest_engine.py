@@ -158,10 +158,10 @@ def run_backtest(
         if not score_snap:
             return {"error": f"因子 {factor_factor_id} 无历史数据"}
     elif strategy == "ml_pred":
-        from config import QLIB_PREDICTIONS_APPROVED
-        if not QLIB_PREDICTIONS_APPROVED:
+        from services.ml_gate import is_ml_predictions_approved
+        if not is_ml_predictions_approved():
             conn.close()
-            return {"error": "ml_pred 需 AFR_QLIB_PREDICTIONS_APPROVED=true"}
+            return {"error": "ml_pred 需通过 OOS 指标门控（或 AFR_QLIB_PREDICTIONS_APPROVED=true 强制放行）"}
         from config import ML_DEFAULT_HORIZON
         from services.ml_predictions import model_version_for_horizon
 

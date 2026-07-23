@@ -90,13 +90,15 @@ async def feature_flags():
         QLIB_ENABLED,
         GRAY_RELEASE_PCT,
         DUAL_SCORE_UI,
-        QLIB_PREDICTIONS_APPROVED,
+        QLIB_PREDICTIONS_APPROVED_FORCE,
         SCORING_MODE,
     )
     from schema_glossary import SCHEMA_GLOSSARY_VERSION
     from services.beta_health import get_rust_backtest_status
+    from services.ml_gate import ml_predictions_gate_status
 
     rust_backtest = get_rust_backtest_status()
+    ml_gate = ml_predictions_gate_status()
     return {
         "version": API_VERSION,
         "backtest": ENABLE_BACKTEST,
@@ -114,7 +116,9 @@ async def feature_flags():
             "rust_backtest": rust_backtest,
             "rust_approved": rust_backtest["approved"],
             "rust_backtest_available": rust_backtest["available"],
-            "qlib_predictions_approved": QLIB_PREDICTIONS_APPROVED,
+            "qlib_predictions_approved": ml_gate["approved"],
+            "qlib_predictions_gate": ml_gate,
+            "qlib_predictions_approved_force": QLIB_PREDICTIONS_APPROVED_FORCE,
             "gray_release_pct": GRAY_RELEASE_PCT,
             "dual_score_ui": DUAL_SCORE_UI,
         },

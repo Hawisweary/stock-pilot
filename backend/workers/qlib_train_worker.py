@@ -66,35 +66,11 @@ def _demo_train(db_path: str, forward_days: int = 20) -> dict:
     }
 
 
-def _load_quote_panel(db_path: str) -> tuple[dict[str, list], dict[str, int], list[str]]:
-    conn = sqlite3.connect(db_path)
-    dates = [
-        r[0]
-        for r in conn.execute(
-            "SELECT DISTINCT trade_date FROM stock_daily_quotes ORDER BY trade_date"
-        ).fetchall()
-    ]
-    by_code: dict[str, list] = defaultdict(list)
-    code_to_id: dict[str, int] = {}
-    for r in conn.execute(
-        """SELECT s.id, s.code, q.trade_date,
-                  COALESCE(q.adj_close, q.close), q.volume,
-                  COALESCE(q.high, q.close), COALESCE(q.low, q.close),
-                  COALESCE(q.turnover, 0), COALESCE(q.amount, 0)
-           FROM stock_daily_quotes q JOIN stocks s ON q.stock_id=s.id
-           WHERE s.is_active=1 AND COALESCE(q.adj_close, q.close) IS NOT NULL
-           ORDER BY s.code, q.trade_date"""
-    ).fetchall():
-        code_to_id[r[1]] = int(r[0])
-        by_code[r[1]].append(
-            (r[2], float(r[3]), float(r[4] or 0), float(r[5]), float(r[6]), float(r[7]), float(r[8]))
-        )
-    conn.close()
-    return by_code, code_to_id, dates
+from services.ml_quotes import load_quote_panel as _load_quote_panel  # noqa: E402
 
 
-def _min_bars(horizon: int, forward_days: int) -> int:
-    return LOOKBACK_BY_HORIZON.get(horizon, 30) + forward_days + 5
+def _min_bars(forward_days: int) -> int:
+    return LOOKBACK_BY_HORIZON.get(forward_days, 30) + forward_days + 5
 
 
 def _build_training_panel(
@@ -112,7 +88,7 @@ def _build_training_panel(
 
     window_dates = set(dates[-(train_days + forward_days + lookback) :])
     pred_date = dates[-1]
-    min_bars = _min_bars(forward_days, forward_days)
+    min_bars = _min_bars(forward_days)
     pending: dict[str, list[tuple[str, int, int, float]]] = defaultdict(list)
 
     for code, series in by_code.items():
@@ -289,8 +265,24 @@ def main() -> int:
         qlib_note = "qlib absent; LightGBM/sklearn pipeline"
 
     results = []
+    use_wf = payload.get("walkforward", True)
     for h in horizons:
-        r = _lightgbm_train(db_path, train_days=train_days, forward_days=h)
+        if h == 20 and use_wf:
+            from services.ml_walkforward import run_h20_walkforward
+
+            r = run_h20_walkforward(
+                db_path,
+                train_window_days=int(payload.get("wf_train_window_days", 480)),
+                step_days=int(payload.get("wf_step_days", 20)),
+                forward_days=20,
+                max_folds=payload.get("wf_max_folds"),
+            )
+            if r.get("status") != "done":
+                r2 = _demo_train(db_path, 20)
+                r2["note"] = f"wf fallback: {r.get('reason')}"
+                r = r2
+        else:
+            r = _lightgbm_train(db_path, train_days=train_days, forward_days=h)
         r["note"] = qlib_note
         results.append(r)
 

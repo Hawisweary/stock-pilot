@@ -111,10 +111,11 @@ async def ml_top_experimental(
     horizon: int | None = Query(None, description="5/20/60 日 horizon"),
 ):
     """ML Top N（实验，需 QLIB 开启或 predictions 已 seed）"""
-    from config import ML_DEFAULT_HORIZON, ML_HORIZONS, QLIB_ENABLED, QLIB_PREDICTIONS_APPROVED
+    from config import ML_DEFAULT_HORIZON, ML_HORIZONS, QLIB_ENABLED
+    from services.ml_gate import is_ml_predictions_approved
     from services.ml_predictions import get_latest_predictions, list_ml_horizons
 
-    enabled = QLIB_ENABLED or QLIB_PREDICTIONS_APPROVED
+    enabled = QLIB_ENABLED or is_ml_predictions_approved()
     h = horizon if horizon is not None else ML_DEFAULT_HORIZON
     preds = get_latest_predictions(limit=limit, horizon=h) if enabled else []
     return {

@@ -21,7 +21,7 @@ import { LhbPeriodStatsCard } from '@/components/LhbPeriodStatsCard';
 import { AlphaFactorsCard } from '@/components/AlphaFactorsCard';
 import { ConsensusEpsCard } from '@/components/ConsensusEpsCard';
 import Link from 'next/link';
-import { ArrowLeft, Download } from 'lucide-react';
+import { ArrowLeft, Download, Ruler, Factory, BarChart3, FileText, Newspaper } from 'lucide-react';
 import { api } from '@/lib/api';
 import { avgReliableYoy, formatProfitYoy, formatRevenueYoy } from '@/lib/yoyDisplay';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -183,7 +183,7 @@ export default function StockDetailPage() {
   }, [klinePeriod, klineData, stockData?.kline]);
 
   if (state === 'loading') return <div className="p-8"><StockDetailSkeleton /></div>;
-  if (state === 'error' || !stockData) return <div className="p-8 text-center text-red-600">股票未找到: {code}</div>;
+  if (state === 'error' || !stockData) return <div className="p-8 text-center text-muted-foreground">股票未找到: {code}</div>;
 
   const price = stockData.close ?? stockData.price;
   const priceStr = price != null ? `¥${Number(price).toFixed(2)}` : "--";
@@ -191,25 +191,25 @@ export default function StockDetailPage() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-4 space-y-4">
       {/* Hero 头部 */}
-      <div className="rounded-xl border bg-card px-5 py-4">
+      <div className="rounded-md border border-border bg-card px-5 py-4">
         <div className="flex items-start gap-4 flex-wrap">
           <Link href="/" className="mt-1"><ArrowLeft className="w-4 h-4 text-muted-foreground" /></Link>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl font-bold">{stockData.name}</h1>
+              <h1 className="text-xl font-semibold tracking-tight">{stockData.name}</h1>
               <span className="text-muted-foreground text-sm font-mono">{stockData.code}</span>
               {stockData.industry_sw && (
-                <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                <span className="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded font-medium">
                   {stockData.industry_sw}
                 </span>
               )}
               {stockData.industry_sw2 && stockData.industry_sw2 !== stockData.industry_sw && (
-                <span className="text-[11px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
+                <span className="text-[11px] bg-primary/5 text-primary/80 px-2 py-0.5 rounded font-medium">
                   {stockData.industry_sw2}
                 </span>
               )}
               {stockData.industry_sw3 && stockData.industry_sw3 !== stockData.industry_sw2 && stockData.industry_sw3 !== stockData.industry_sw && (
-                <span className="text-[10px] bg-blue-50/60 text-blue-500 px-2 py-0.5 rounded-full font-medium">
+                <span className="text-[10px] bg-primary/5 text-primary/60 px-2 py-0.5 rounded font-medium">
                   {stockData.industry_sw3}
                 </span>
               )}
@@ -217,12 +217,12 @@ export default function StockDetailPage() {
             {/* 快速指标横排 */}
             <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2">
               <div>
-                <span className="text-2xl font-bold">{priceStr}</span>
+                <span className="text-2xl font-bold font-mono tabular-nums">{priceStr}</span>
               </div>
               {stockData.pe_ttm != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">PE(TTM) </span>
-                  <span className={`font-semibold ${stockData.pe_ttm > 100 ? 'text-red-500' : stockData.pe_ttm < 15 ? 'text-green-600' : ''}`}>
+                  <span className={`font-semibold font-mono tabular-nums ${stockData.pe_ttm > 100 ? 'text-up' : stockData.pe_ttm < 15 ? 'text-down' : ''}`}>
                     {stockData.pe_ttm.toFixed(1)}x
                   </span>
                 </div>
@@ -230,97 +230,97 @@ export default function StockDetailPage() {
               {stockData.pe != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">PE </span>
-                  <span className="font-semibold">{stockData.pe.toFixed(1)}x</span>
+                  <span className="font-semibold font-mono tabular-nums">{stockData.pe.toFixed(1)}x</span>
                 </div>
               )}
               {stockData.ps_ttm != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">PS(TTM) </span>
-                  <span className="font-semibold">{stockData.ps_ttm.toFixed(2)}x</span>
+                  <span className="font-semibold font-mono tabular-nums">{stockData.ps_ttm.toFixed(2)}x</span>
                 </div>
               )}
               {stockData.pb != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">PB </span>
-                  <span className="font-semibold">{stockData.pb.toFixed(2)}x</span>
+                  <span className="font-semibold font-mono tabular-nums">{stockData.pb.toFixed(2)}x</span>
                 </div>
               )}
               {stockData.roe_ttm != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">ROE </span>
-                  <span className="font-semibold">{(stockData.roe_ttm * 100).toFixed(1)}%</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.roe_ttm * 100).toFixed(1)}%</span>
                 </div>
               )}
               {stockData.total_mv != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">市值 </span>
-                  <span className="font-semibold">{(stockData.total_mv / 1e8).toFixed(0)}亿</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.total_mv / 1e8).toFixed(0)}亿</span>
                 </div>
               )}
               {stockData.turnover_rate != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">换手率 </span>
-                  <span className="font-semibold">{Number(stockData.turnover_rate).toFixed(2)}%</span>
+                  <span className="font-semibold font-mono tabular-nums">{Number(stockData.turnover_rate).toFixed(2)}%</span>
                 </div>
               )}
               {stockData.volume != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">成交量 </span>
-                  <span className="font-semibold">{(stockData.volume / 1e4).toFixed(1)}万股</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.volume / 1e4).toFixed(1)}万股</span>
                 </div>
               )}
               {stockData.amount != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">成交额 </span>
-                  <span className="font-semibold">{(stockData.amount / 1e8).toFixed(2)}亿</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.amount / 1e8).toFixed(2)}亿</span>
                 </div>
               )}
               {stockData.volume_ratio != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">量比 </span>
-                  <span className="font-semibold">{Number(stockData.volume_ratio).toFixed(2)}</span>
+                  <span className="font-semibold font-mono tabular-nums">{Number(stockData.volume_ratio).toFixed(2)}</span>
                 </div>
               )}
               {stockData.total_share != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">总股本 </span>
-                  <span className="font-semibold">{(stockData.total_share / 1e4).toFixed(2)}亿股</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.total_share / 1e4).toFixed(2)}亿股</span>
                 </div>
               )}
               {stockData.float_share != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">流通股本 </span>
-                  <span className="font-semibold">{(stockData.float_share / 1e4).toFixed(2)}亿股</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.float_share / 1e4).toFixed(2)}亿股</span>
                 </div>
               )}
               {stockData.free_share != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">自由流通股本 </span>
-                  <span className="font-semibold">{(stockData.free_share / 1e4).toFixed(2)}亿股</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.free_share / 1e4).toFixed(2)}亿股</span>
                 </div>
               )}
               {stockData.turnover_rate_f != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">自由流通换手率 </span>
-                  <span className="font-semibold">{Number(stockData.turnover_rate_f).toFixed(2)}%</span>
+                  <span className="font-semibold font-mono tabular-nums">{Number(stockData.turnover_rate_f).toFixed(2)}%</span>
                 </div>
               )}
               {stockData.dividend_yield != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">股息率 </span>
-                  <span className="font-semibold">{(stockData.dividend_yield * 100).toFixed(2)}%</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.dividend_yield * 100).toFixed(2)}%</span>
                 </div>
               )}
               {stockData.dividend_yield_ttm != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">股息率(TTM) </span>
-                  <span className="font-semibold">{Number(stockData.dividend_yield_ttm).toFixed(2)}%</span>
+                  <span className="font-semibold font-mono tabular-nums">{Number(stockData.dividend_yield_ttm).toFixed(2)}%</span>
                 </div>
               )}
               {stockData.limit_status != null && stockData.limit_status !== 0 && (
                 <div className="text-sm" title="上一交易日收盘涨跌停状态（Tushare daily_basic，非实时）">
                   <span className="text-muted-foreground text-xs">昨日状态 </span>
-                  <span className={`font-semibold ${[2, 3].includes(stockData.limit_status) ? 'text-red-500' : [5, 6].includes(stockData.limit_status) ? 'text-green-600' : ''}`}>
+                  <span className={`font-semibold font-mono tabular-nums ${[2, 3].includes(stockData.limit_status) ? 'text-up' : [5, 6].includes(stockData.limit_status) ? 'text-down' : ''}`}>
                     {LIMIT_STATUS_LABELS[stockData.limit_status] ?? '--'}
                   </span>
                 </div>
@@ -328,37 +328,37 @@ export default function StockDetailPage() {
               {stockData.eps != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">每股收益 </span>
-                  <span className="font-semibold">{Number(stockData.eps).toFixed(2)}元</span>
+                  <span className="font-semibold font-mono tabular-nums">{Number(stockData.eps).toFixed(2)}元</span>
                 </div>
               )}
               {stockData.rd_exp != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">研发费用 </span>
-                  <span className="font-semibold">{(stockData.rd_exp / 1e8).toFixed(2)}亿</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.rd_exp / 1e8).toFixed(2)}亿</span>
                 </div>
               )}
               {stockData.money_cap != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">货币资金 </span>
-                  <span className="font-semibold">{(stockData.money_cap / 1e8).toFixed(2)}亿</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.money_cap / 1e8).toFixed(2)}亿</span>
                 </div>
               )}
               {stockData.inventories != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">存货 </span>
-                  <span className="font-semibold">{(stockData.inventories / 1e8).toFixed(2)}亿</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.inventories / 1e8).toFixed(2)}亿</span>
                 </div>
               )}
               {stockData.goodwill != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">商誉 </span>
-                  <span className="font-semibold">{(stockData.goodwill / 1e8).toFixed(2)}亿</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.goodwill / 1e8).toFixed(2)}亿</span>
                 </div>
               )}
               {stockData.fix_assets != null && (
                 <div className="text-sm">
                   <span className="text-muted-foreground text-xs">固定资产 </span>
-                  <span className="font-semibold">{(stockData.fix_assets / 1e8).toFixed(2)}亿</span>
+                  <span className="font-semibold font-mono tabular-nums">{(stockData.fix_assets / 1e8).toFixed(2)}亿</span>
                 </div>
               )}
             </div>
@@ -465,25 +465,25 @@ function DeepFundamental({ stockId }: { stockId: number }) {
 
   return (
     <Card>
-      <CardHeader className="pb-2"><CardTitle className="text-sm">📐 深度基本面</CardTitle></CardHeader>
+      <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-1.5"><Ruler className="w-3.5 h-3.5 text-muted-foreground" /> 深度基本面</CardTitle></CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 gap-3 text-center">
-          <div className="bg-muted rounded p-2">
-            <div className="text-[10px] text-muted-foreground">近4Q平均营收增速</div>
-            <div className={"text-lg font-bold "+ ((avgRevGrowth ?? 0)>10?'text-red-600':(avgRevGrowth ?? 0)>0?'text-green-600':'text-gray-500')}>
+          <div className="border border-border rounded p-2">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">近4Q平均营收增速</div>
+            <div className={"text-lg font-bold font-mono tabular-nums "+ ((avgRevGrowth ?? 0)>10?'text-up':(avgRevGrowth ?? 0)>0?'text-down':'text-muted-foreground')}>
               {avgRevGrowth != null ? `${avgRevGrowth.toFixed(1)}%` : '基期过小'}
             </div>
           </div>
-          <div className="bg-muted rounded p-2">
-            <div className="text-[10px] text-muted-foreground">近4Q平均利润增速</div>
-            <div className={"text-lg font-bold "+ ((avgProfitGrowth ?? 0)>15?'text-red-600':(avgProfitGrowth ?? 0)>0?'text-green-600':'text-gray-500')}>
+          <div className="border border-border rounded p-2">
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">近4Q平均利润增速</div>
+            <div className={"text-lg font-bold font-mono tabular-nums "+ ((avgProfitGrowth ?? 0)>15?'text-up':(avgProfitGrowth ?? 0)>0?'text-down':'text-muted-foreground')}>
               {avgProfitGrowth != null ? `${avgProfitGrowth.toFixed(1)}%` : '基期过小'}
             </div>
           </div>
         </div>
 
         {recentQ.length > 0 && (
-          <div className="mt-3 border-t pt-3">
+          <div className="mt-3 border-t border-border pt-3">
             <div className="text-[11px] text-muted-foreground mb-2">近4季度趋势</div>
             <div className="grid grid-cols-4 gap-1">
               {recentQ.map((q: any, i: number) => {
@@ -491,15 +491,15 @@ function DeepFundamental({ stockId }: { stockId: number }) {
                 const prof = formatProfitYoy(q);
                 return (
                 <div key={i} className="text-center text-[10px]">
-                  <div className="text-muted-foreground">{q.period_end_date?.slice(5)}</div>
+                  <div className="text-muted-foreground font-mono">{q.period_end_date?.slice(5)}</div>
                   <div
-                    className={(rev.warning ? 'text-orange-600 bg-orange-50 rounded px-0.5 ' : '') + (q.revenue_yoy>=15?"text-red-600 font-bold":q.revenue_yoy>=0?"text-green-600":"text-gray-500")}
+                    className={'font-mono tabular-nums ' + (rev.warning ? 'text-orange-600 bg-orange-500/10 rounded px-0.5 ' : '') + (q.revenue_yoy>=15?"text-up font-bold":q.revenue_yoy>=0?"text-down":"text-muted-foreground")}
                     title={rev.title}
                   >
                     营收{rev.text}
                   </div>
                   <div
-                    className={(prof.warning ? 'text-orange-600 bg-orange-50 rounded px-0.5 font-medium ' : '') + (q.profit_yoy>=20?"text-red-600 font-bold":q.profit_yoy>=0?"text-green-600":"text-red-500")}
+                    className={'font-mono tabular-nums ' + (prof.warning ? 'text-orange-600 bg-orange-500/10 rounded px-0.5 font-medium ' : '') + (q.profit_yoy>=20?"text-up font-bold":q.profit_yoy>=0?"text-down":"text-up")}
                     title={prof.title}
                   >
                     利润{prof.text.startsWith('基期') ? prof.text : (q.profit_yoy != null && q.profit_yoy >= 0 ? '+' : '') + prof.text}
@@ -539,26 +539,26 @@ function PeerSection({ stockId, stock }: { stockId: number; stock: any }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">🏭 同业</CardTitle>
+        <CardTitle className="text-sm flex items-center gap-1.5"><Factory className="w-3.5 h-3.5 text-muted-foreground" /> 同业</CardTitle>
       </CardHeader>
       <CardContent>
         <table className="w-full text-[11px]">
           <thead>
-            <tr className="text-left text-muted-foreground border-b">
-              <th>股票</th>
-              <th className="text-right">PE</th>
-              <th className="text-right">V5</th>
+            <tr className="text-left text-muted-foreground border-b border-border">
+              <th className="font-normal">股票</th>
+              <th className="text-right font-normal">PE</th>
+              <th className="text-right font-normal">V5</th>
             </tr>
           </thead>
           <tbody>
             {[{ ...stock, is_current: true }, ...peers].map((p, i) => (
-              <tr key={i} className={'border-b ' + (p.is_current ? 'bg-blue-50 font-bold' : '')}>
+              <tr key={i} className={'border-b border-border ' + (p.is_current ? 'bg-primary/5 font-semibold' : '')}>
                 <td className="py-0.5">
                   {p.name?.slice(0, 6)}
-                  {p.is_current ? ' 👈' : ''}
+                  {p.is_current ? <span className="text-primary">·当前</span> : ''}
                 </td>
-                <td className="py-0.5 text-right font-mono">{p.pe_ttm?.toFixed(1) || '--'}</td>
-                <td className="py-0.5 text-right font-bold">
+                <td className="py-0.5 text-right font-mono tabular-nums">{p.pe_ttm?.toFixed(1) || '--'}</td>
+                <td className="py-0.5 text-right font-mono tabular-nums font-semibold">
                   {p.composite_v5?.toFixed(0) || '--'}
                 </td>
               </tr>
@@ -596,7 +596,7 @@ function QuarterlySection({ stockId, stockName }: { stockId: number; stockName: 
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">📊 财报趋势 · {stockName}</CardTitle>
+        <CardTitle className="text-sm flex items-center gap-1.5"><BarChart3 className="w-3.5 h-3.5 text-muted-foreground" /> 财报趋势 · {stockName}</CardTitle>
         {data.yoy_note && (
           <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{data.yoy_note}</p>
         )}
@@ -605,7 +605,7 @@ function QuarterlySection({ stockId, stockName }: { stockId: number; stockName: 
         <div className="h-64 w-full min-w-0">
           <ResponsiveContainer width="100%" height={256} minWidth={0}>
             <BarChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="period" tick={{ fontSize: 11 }} tickLine={false} />
               <YAxis tickFormatter={formatYi} tick={{ fontSize: 10 }} width={52} />
               <Tooltip
@@ -615,8 +615,8 @@ function QuarterlySection({ stockId, stockName }: { stockId: number; stockName: 
                 contentStyle={{ fontSize: 12 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Bar dataKey="营收" name="营收(亿)" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-              <Bar dataKey="净利润" name="净利润(亿)" fill="#22c55e" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="营收" name="营收(亿)" fill="var(--color-chart-1)" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="净利润" name="净利润(亿)" fill="var(--color-chart-2)" radius={[2, 2, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -624,13 +624,13 @@ function QuarterlySection({ stockId, stockName }: { stockId: number; stockName: 
           <div className="h-48 w-full mt-2 min-w-0">
             <ResponsiveContainer width="100%" height={192} minWidth={0}>
               <LineChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="period" tick={{ fontSize: 11 }} tickLine={false} />
                 <YAxis tickFormatter={(v) => v + '%'} tick={{ fontSize: 10 }} width={44} domain={['auto', 'auto']} />
                 <Tooltip formatter={(value: number) => [`${value}%`, '']} contentStyle={{ fontSize: 12 }} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Line type="monotone" dataKey="营收同比" name="营收同比" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                <Line type="monotone" dataKey="利润同比" name="利润同比" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="营收同比" name="营收同比" stroke="var(--color-chart-1)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="利润同比" name="利润同比" stroke="var(--color-chart-2)" strokeWidth={2} dot={{ r: 3 }} connectNulls />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -669,7 +669,7 @@ function AnnouncementsSection({ stockId }: { stockId: number }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">📋 公告</CardTitle>
+        <CardTitle className="text-sm flex items-center gap-1.5"><FileText className="w-3.5 h-3.5 text-muted-foreground" /> 公告</CardTitle>
       </CardHeader>
       <CardContent className="space-y-1.5">
         {items.map((a, i) => (
@@ -703,7 +703,7 @@ function RightSidebarTabs({
   return (
     <div className="space-y-3">
       {/* Tab 切换条 */}
-      <div className="flex rounded-lg border overflow-hidden">
+      <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
         {tabs.map((t) => (
           <button
             key={t}
@@ -720,7 +720,7 @@ function RightSidebarTabs({
       {tab === "评分" && (
         <div className="space-y-3">
           <V5ScorePanel stockId={stockId} />
-          <div className="rounded-xl border bg-card p-4 space-y-2">
+          <div className="rounded-md border border-border bg-card p-4 space-y-2">
             <h3 className="text-sm font-semibold">评分历史</h3>
             <ScoreTrendChart stockId={stockId} />
           </div>
@@ -784,7 +784,7 @@ function NewsSection({ stockId, stockName }: { stockId: number; stockName: strin
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">📰 新闻 · {stockName}</CardTitle>
+        <CardTitle className="text-sm flex items-center gap-1.5"><Newspaper className="w-3.5 h-3.5 text-muted-foreground" /> 新闻 · {stockName}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-1.5">
         {news.map((n, i) => (

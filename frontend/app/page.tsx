@@ -32,7 +32,9 @@ export default function DashboardPage() {
   const [review, setReview] = useState<any>(null);
   const [hotspots, setHotspots] = useState<any>(null);
   const [thsHot, setThsHot] = useState<any>(null);
-  const [mlTop, setMlTop] = useState<{ code: string; name: string; score: number; model_version?: string }[]>([]);
+  const [mlTop, setMlTop] = useState<
+    { code: string; name: string; score: number; model_version?: string; is_demo?: boolean }[]
+  >([]);
   const [v5Rank, setV5Rank] = useState<import("@/lib/api").V5ScoreRow[]>([]);
   const [v5CalcDate, setV5CalcDate] = useState<string | null>(null);
   const [sparklines, setSparklines] = useState<SparklineSeries>({});
@@ -297,14 +299,24 @@ export default function DashboardPage() {
             <button onClick={() => router.push("/qlib")} className="text-xs text-primary hover:underline">详情 →</button>
           </CardHeader>
           <CardContent className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border text-xs">
-            {mlTop.map((p) => (
-              <div key={p.code} className="px-2.5 py-1">
-                <div className="font-mono text-muted-foreground">{p.code}</div>
-                <div className="truncate">{p.name}</div>
-                <div className="font-mono font-semibold text-primary">{p.score?.toFixed?.(1) ?? p.score}</div>
-                <div className="text-[10px] text-muted-foreground truncate">{p.model_version || "ml"}</div>
-              </div>
-            ))}
+            {mlTop.map((p) => {
+              const demo = p.is_demo ?? (p.model_version?.startsWith("demo_") ?? false);
+              return (
+                <div
+                  key={p.code}
+                  className={`px-2.5 py-1 ${demo ? "bg-muted/50 border border-dashed border-muted-foreground/30 rounded-sm" : ""}`}
+                  title="实验性排序信号，未经样本外验证；请结合 V5 判断。"
+                >
+                  <div className="font-mono text-muted-foreground">{p.code}</div>
+                  <div className="truncate">{p.name}</div>
+                  <div className="font-mono font-semibold text-primary">
+                    {p.score?.toFixed?.(1) ?? p.score}
+                    {demo && <span className="ml-1 text-[9px] font-normal text-muted-foreground">Demo</span>}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground truncate">{p.model_version || "ml"}</div>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}

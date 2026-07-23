@@ -724,10 +724,27 @@ export const api = {
       enabled: boolean;
       horizon?: number;
       horizons_available?: number[];
-      predictions: { code: string; name: string; score: number; model_version?: string }[];
+      predictions: {
+        code: string;
+        name: string;
+        score: number;
+        model_version?: string;
+        is_demo?: boolean;
+      }[];
     }>(`/dashboard/ml-top?limit=${limit}${horizon != null ? `&horizon=${horizon}` : ""}`),
   qlibPredictions: (limit = 20) =>
-    request<{ enabled: boolean; predictions: Record<string, unknown>[] }>(`/qlib/predictions?limit=${limit}`),
+    request<{
+      enabled: boolean;
+      validation?: Record<string, unknown>;
+      predictions: {
+        code: string;
+        name: string;
+        score: number;
+        model_version?: string;
+        is_demo?: boolean;
+        composite_v5?: number | null;
+      }[];
+    }>(`/qlib/predictions?limit=${limit}`),
   qlibTrain: () => request<Record<string, unknown>>("/qlib/train", { method: "POST" }),
   topStocks: (limit = 5) => request<ScoreRanking[]>(`/dashboard/top-stocks?limit=${limit}`),
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Rocket, Coins, type LucideIcon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { V5ScoreExplainer } from "@/components/V5ScoreExplainer";
 import { scoreTextClass } from "@/lib/scoreColors";
@@ -191,13 +192,13 @@ export function V5ScorePanel({ stockId }: { stockId: number }) {
   const capTier = (tiers.capital as number | null) ?? null;
   const valTier = (tiers.valuation as number | null) ?? null;
   const qualTier = (tiers.quality as number | null) ?? null;
-  const profileHint: { label: string; color: string; tip: string } | null = (() => {
+  const profileHint: { label: string; color: string; tip: string; icon: LucideIcon } | null = (() => {
     const momScore = (techTier ?? 0) + (capTier ?? 0);
     const valScore = (valTier ?? 0) + (qualTier ?? 0);
     if (momScore >= 2 && momScore > valScore)
-      return { label: "🚀 动量视角", color: "text-orange-700 bg-orange-50", tip: "技术+资金偏强，适合动量榜筛选" };
+      return { label: "动量视角", color: "text-primary bg-primary/10", tip: "技术+资金偏强，适合动量榜筛选", icon: Rocket };
     if (valScore >= 2 && valScore >= momScore && qualTier != null && qualTier >= 0)
-      return { label: "💰 红利/价值", color: "text-green-700 bg-green-50", tip: "估值低+质量稳，适合价值/红利榜" };
+      return { label: "红利/价值", color: "text-down bg-[var(--down)]/10", tip: "估值低+质量稳，适合价值/红利榜", icon: Coins };
     return null;
   })();
   const missingDims =
@@ -293,6 +294,7 @@ export function V5ScorePanel({ stockId }: { stockId: number }) {
         {/* M0: 画像提示 */}
         {profileHint && (
           <div className={`text-[10px] px-2 py-1 rounded flex items-center gap-1 ${profileHint.color}`} title={profileHint.tip}>
+            <profileHint.icon className="w-3 h-3 shrink-0" />
             <span className="font-medium">{profileHint.label}</span>
             <span className="opacity-70">{profileHint.tip}</span>
           </div>
