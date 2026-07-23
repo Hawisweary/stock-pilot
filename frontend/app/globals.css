@@ -35,6 +35,8 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-up: var(--up);
+  --color-down: var(--down);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -49,30 +51,35 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* 冷中性 Slate 底 + 电蓝强调(sat<80%);A股红涨绿跌为功能色,不作品牌色 */
+  --background: oklch(0.986 0.003 250);
+  --foreground: oklch(0.22 0.02 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.22 0.02 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
+  --popover-foreground: oklch(0.22 0.02 260);
+  --primary: oklch(0.575 0.15 254);
+  --primary-foreground: oklch(0.99 0.005 250);
+  --secondary: oklch(0.965 0.005 250);
+  --secondary-foreground: oklch(0.3 0.02 260);
+  --muted: oklch(0.965 0.005 250);
+  --muted-foreground: oklch(0.55 0.02 256);
+  --accent: oklch(0.95 0.012 250);
+  --accent-foreground: oklch(0.3 0.02 260);
+  --destructive: oklch(0.585 0.21 25);
+  --border: oklch(0.915 0.006 255);
+  --input: oklch(0.915 0.006 255);
+  --ring: oklch(0.575 0.15 254);
+  /* 功能色:涨=红 跌=绿(A股) */
+  --up: oklch(0.585 0.2 25);
+  --down: oklch(0.6 0.13 158);
+  /* 图表:蓝主色 + 克制的中性/暖色辅色,无紫无霓虹 */
+  --chart-1: oklch(0.575 0.15 254);
+  --chart-2: oklch(0.62 0.11 200);
+  --chart-3: oklch(0.68 0.12 145);
+  --chart-4: oklch(0.72 0.13 70);
+  --chart-5: oklch(0.6 0.02 256);
+  --radius: 0.375rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -84,29 +91,32 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* 深 Slate 底(非纯黑) + 提亮的电蓝 */
+  --background: oklch(0.19 0.018 262);
+  --foreground: oklch(0.95 0.008 250);
+  --card: oklch(0.226 0.02 262);
+  --card-foreground: oklch(0.95 0.008 250);
+  --popover: oklch(0.226 0.02 262);
+  --popover-foreground: oklch(0.95 0.008 250);
+  --primary: oklch(0.66 0.15 254);
+  --primary-foreground: oklch(0.16 0.02 260);
+  --secondary: oklch(0.28 0.02 262);
+  --secondary-foreground: oklch(0.95 0.008 250);
+  --muted: oklch(0.28 0.02 262);
+  --muted-foreground: oklch(0.69 0.02 256);
+  --accent: oklch(0.3 0.02 262);
+  --accent-foreground: oklch(0.95 0.008 250);
+  --destructive: oklch(0.65 0.19 25);
+  --border: oklch(0.33 0.015 262);
+  --input: oklch(0.35 0.015 262);
+  --ring: oklch(0.66 0.15 254);
+  --up: oklch(0.66 0.19 25);
+  --down: oklch(0.68 0.13 158);
+  --chart-1: oklch(0.66 0.15 254);
+  --chart-2: oklch(0.68 0.11 200);
+  --chart-3: oklch(0.72 0.12 145);
+  --chart-4: oklch(0.76 0.13 70);
+  --chart-5: oklch(0.7 0.02 256);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -126,5 +136,26 @@
   }
   html {
     @apply font-sans;
+  }
+  /* 所有 mono(数字/评分/代码)启用等宽数字对齐 */
+  .font-mono,
+  code,
+  kbd,
+  samp {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "ss01" 1;
+  }
+}
+
+@layer components {
+  /* 数据 UI 通用工具 */
+  .num {
+    @apply font-mono tabular-nums;
+  }
+  .text-up {
+    color: var(--up);
+  }
+  .text-down {
+    color: var(--down);
   }
 }

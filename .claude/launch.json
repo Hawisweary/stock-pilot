@@ -2,27 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev-hub-console",
-      "runtimeExecutable": "/Users/harrywang/Projects/hub/console/venv/bin/uvicorn",
-      "runtimeArgs": ["--app-dir", "/Users/harrywang/Projects/hub/console", "server:app", "--host", "0.0.0.0", "--port", "9000"],
-      "port": 9000
-    },
-    {
-      "name": "afr-backend",
-      "runtimeExecutable": "venv-quant/bin/python",
-      "runtimeArgs": ["-m", "uvicorn", "--app-dir", "backend", "app:app", "--host", "0.0.0.0", "--port", "8800"],
-      "port": 8800
-    },
-    {
-      "name": "afr-frontend",
+      "name": "stockpilot-frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
-      "port": 3002
-    },
-    {
-      "name": "guandan",
-      "url": "http://127.0.0.1:5174",
-      "port": 5174
+      "runtimeArgs": ["run", "start", "--prefix", "frontend", "--", "-p", "3006"],
+      "port": 3006
     }
   ]
 }
