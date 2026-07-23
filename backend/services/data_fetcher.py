@@ -457,7 +457,14 @@ class DataFetcher:
         except Exception as e:
             print(f"[Fetcher] 腾讯API失败 {code}: {e}，尝试yfinance备用源")
 
-        # 备用源: yfinance
+        # 备用源: yfinance — 默认禁用。A股行情主源已是Tushare;yfinance对A股
+        # 限流严重,每股4次退避重试~15s,全市场循环会僵死后端20+小时并撑爆WAL。
+        import os as _os
+        if _os.getenv("AFR_ENABLE_YFINANCE", "false").lower() != "true":
+            self._log(stock_id, "quotes", "error",
+                      error="tencent failed; yfinance fallback disabled (AFR_ENABLE_YFINANCE=false)",
+                      duration_ms=int((time.time() - start) * 1000), source="tencent")
+            return 0
         import yfinance.exceptions
         yf_period = "1y" if max_bars <= 150 else "max"
         for attempt in range(4):

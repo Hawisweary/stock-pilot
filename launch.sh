@@ -46,11 +46,24 @@ is_frontend_up() {
     [ -n "$(port_pids "$FRONTEND_PORT")" ]
 }
 
+backend_healthy() {
+    curl -s --max-time 4 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null 2>&1
+}
+
 start_backend() {
     if is_backend_up; then
-        echo "  后端已在运行 (Port: $BACKEND_PORT)"
-        port_pids "$BACKEND_PORT" | head -1 > "$BACKEND_PID"
-        return 0
+        # 僵尸克星:端口被占但 health 不通(进程卡死在抓取/锁上)→ 杀掉重启,
+        # 否则保活会误判"在线"或反复起新进程绑端口失败,形成风暴
+        if backend_healthy; then
+            echo "  后端已在运行 (Port: $BACKEND_PORT)"
+            port_pids "$BACKEND_PORT" | head -1 > "$BACKEND_PID"
+            return 0
+        fi
+        echo "  后端端口被占但无响应(僵尸),清理后重启..."
+        for pid in $(port_pids "$BACKEND_PORT"); do
+            kill -9 "$pid" 2>/dev/null || true
+        done
+        sleep 2
     fi
     cd "$BACKEND_DIR"
     unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy
@@ -151,11 +164,23 @@ stop_port() {
 
 keepalive_loop() {
     set +e
+    local health_fail=0
     while true; do
         sleep 20
         if ! is_backend_up; then
+            health_fail=0
             echo "$(date '+%Y-%m-%d %H:%M:%S') 后端离线，重启..." >> "$PID_DIR/daemon.log"
             start_backend >> "$PID_DIR/daemon.log" 2>&1
+        elif ! backend_healthy; then
+            # 端口在但 health 不通:可能是启动中/短暂繁忙,连续3次(约60s)才判僵尸
+            health_fail=$((health_fail + 1))
+            if [ "$health_fail" -ge 3 ]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') 后端僵尸(端口占用但health连续${health_fail}次无响应)，强制重启..." >> "$PID_DIR/daemon.log"
+                start_backend >> "$PID_DIR/daemon.log" 2>&1
+                health_fail=0
+            fi
+        else
+            health_fail=0
         fi
         if ! is_frontend_up; then
             echo "$(date '+%Y-%m-%d %H:%M:%S') 前端离线，重启..." >> "$PID_DIR/daemon.log"

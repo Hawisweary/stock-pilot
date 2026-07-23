@@ -137,6 +137,20 @@ def init(db_path: str | None = None):
     global _conn
     path = db_path or DB_PATH
 
+    # 启动前 WAL 体检:后端停机期间看门狗不在,批任务可把 WAL 撑到数GB,
+    # 启动时若超阈值先 TRUNCATE checkpoint,避免带病启动(读扫穿WAL极慢)
+    try:
+        wal_path = path + "-wal"
+        if os.path.exists(wal_path) and os.path.getsize(wal_path) > 512 * 1e6:
+            print(f"[DB] 启动检测到WAL {os.path.getsize(wal_path)/1e9:.1f}GB, 先checkpoint...")
+            _pre = sqlite3.connect(path, timeout=180)
+            _pre.execute("PRAGMA busy_timeout=180000")
+            r = _pre.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            _pre.close()
+            print(f"[DB] 启动checkpoint完成: {r}")
+    except Exception as _e:
+        print(f"[DB] 启动WAL checkpoint跳过: {_e}")
+
     # timeout 加大到120s：启动建表/迁移需要熬过后台批任务的长写事务
     _conn = sqlite3.connect(path, check_same_thread=False, timeout=120)
     _conn.row_factory = sqlite3.Row
