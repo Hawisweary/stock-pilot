@@ -20,7 +20,8 @@ import { PortfolioPnlCard } from "@/components/PortfolioPnlCard";
 import { exportCsv } from "@/lib/csvExport";
 import { scoreTextClass } from "@/lib/scoreColors";
 import { useToast } from "@/lib/useToast";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Bot, FileText, Flame, Landmark, Rocket, Trophy, NotebookPen } from "lucide-react";
+import { Skeleton, ErrorState, StatTile } from "@/components/ui/data-ui";
 
 export default function DashboardPage() {
   const toast = useToast();
@@ -183,33 +184,44 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 animate-pulse">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <div className="grid grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-24 bg-muted rounded-lg" />
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-7 w-40" />
+          <Skeleton className="h-7 w-24" />
+        </div>
+        <div className="grid grid-cols-3 divide-x divide-border rounded-md border border-border">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="px-3 py-2 space-y-1.5">
+              <Skeleton className="h-2.5 w-14" />
+              <Skeleton className="h-6 w-20" />
+              <Skeleton className="h-2.5 w-24" />
+            </div>
           ))}
         </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-40" />)}
+        </div>
+        <Skeleton className="h-64" />
       </div>
     );
   }
 
-  if (!overview) return <div>加载失败</div>;
+  if (!overview) return <ErrorState message="Dashboard 加载失败" onRetry={loadData} />;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <Badge variant={overview.stale_stocks > 0 ? "destructive" : "outline"} className="text-xs">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between border-b border-border pb-3">
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
+          <Badge variant={overview.stale_stocks > 0 ? "destructive" : "outline"} className="text-[11px]">
             {overview.stale_stocks > 0
-              ? `⚠ ${overview.stale_stocks}只数据逾期`
+              ? `${overview.stale_stocks} 只数据逾期`
               : "数据正常"}
           </Badge>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">
-            最后更新: {overview.last_update || "暂无"}
+          <span className="text-[11px] text-muted-foreground font-mono">
+            更新 {overview.last_update || "—"}
           </span>
           <Button
             size="sm"
@@ -224,31 +236,26 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 顶部状态栏：市场环境 / 宏观 / 预警数 */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className={`rounded-lg border px-4 py-3 flex items-center gap-3 ${macro?.score >= 60 ? 'border-green-200 bg-green-50' : macro?.score < 40 ? 'border-red-200 bg-red-50' : 'border-yellow-200 bg-yellow-50'}`}>
-          <div>
-            <div className="text-[10px] text-muted-foreground uppercase tracking-wide">宏观环境</div>
-            <div className={`text-xl font-bold ${macro?.score >= 60 ? 'text-green-700' : macro?.score < 40 ? 'text-red-700' : 'text-yellow-700'}`}>
-              {macro ? `${macro.score}分` : "—"}
-            </div>
-            <div className="text-xs text-muted-foreground">{macro?.label ?? ""}</div>
-          </div>
-        </div>
-        <div className="rounded-lg border px-4 py-3">
-          <div className="text-[10px] text-muted-foreground uppercase tracking-wide">V5 均分</div>
-          <div className={`text-xl font-bold ${avgV5 != null && avgV5 >= 60 ? 'text-green-700' : avgV5 != null && avgV5 < 40 ? 'text-red-700' : 'text-yellow-700'}`}>
-            {avgV5 != null ? avgV5.toFixed(1) : "—"}
-          </div>
-          <div className="text-xs text-muted-foreground">{v5Rank.length} 只股票</div>
-        </div>
-        <div className={`rounded-lg border px-4 py-3 ${overview.stale_stocks > 0 ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50'}`}>
-          <div className="text-[10px] text-muted-foreground uppercase tracking-wide">数据状态</div>
-          <div className={`text-xl font-bold ${overview.stale_stocks > 0 ? 'text-amber-700' : 'text-green-700'}`}>
-            {overview.stale_stocks > 0 ? `${overview.stale_stocks} 逾期` : "正常"}
-          </div>
-          <div className="text-xs text-muted-foreground">{overview.active_stocks}/{overview.stock_count} 活跃</div>
-        </div>
+      {/* 顶部状态条：宏观 / V5均分 / 数据状态 — 硬化分区,色彩只落在数值 */}
+      <div className="grid grid-cols-3 divide-x divide-border rounded-md border border-border bg-card">
+        <StatTile
+          label="宏观环境"
+          value={macro ? macro.score : "—"}
+          sub={macro?.label ?? ""}
+          tone={macro?.score >= 60 ? "up" : macro?.score < 40 ? "down" : "neutral"}
+        />
+        <StatTile
+          label="V5 均分"
+          value={avgV5 != null ? avgV5.toFixed(1) : "—"}
+          sub={`${v5Rank.length} 只股票`}
+          tone="accent"
+        />
+        <StatTile
+          label="数据状态"
+          value={overview.stale_stocks > 0 ? `${overview.stale_stocks} 逾期` : "正常"}
+          sub={`${overview.active_stocks}/${overview.stock_count} 活跃`}
+          tone={overview.stale_stocks > 0 ? "up" : "neutral"}
+        />
       </div>
 
       {/* 预警 + 财报日历 + 持仓盈亏 */}
@@ -284,16 +291,18 @@ export default function DashboardPage() {
       {mlTop.length > 0 && (
         <Card>
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-base">🤖 ML 预测 Top {mlTop.length}</CardTitle>
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <Bot className="h-4 w-4 text-muted-foreground" /> ML 预测 Top {mlTop.length}
+            </CardTitle>
             <button onClick={() => router.push("/qlib")} className="text-xs text-primary hover:underline">详情 →</button>
           </CardHeader>
-          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border text-xs">
             {mlTop.map((p) => (
-              <div key={p.code} className="border rounded p-2">
-                <div className="font-mono">{p.code}</div>
+              <div key={p.code} className="px-2.5 py-1">
+                <div className="font-mono text-muted-foreground">{p.code}</div>
                 <div className="truncate">{p.name}</div>
-                <div className="font-bold text-purple-600">{p.score?.toFixed?.(1) ?? p.score}</div>
-                <div className="text-muted-foreground">{p.model_version || "ml"}</div>
+                <div className="font-mono font-semibold text-primary">{p.score?.toFixed?.(1) ?? p.score}</div>
+                <div className="text-[10px] text-muted-foreground truncate">{p.model_version || "ml"}</div>
               </div>
             ))}
           </CardContent>
@@ -341,12 +350,14 @@ export default function DashboardPage() {
           }}
         />
         {review && (
-          <Card><CardContent className="p-4">
-            <div className="text-xs font-medium text-muted-foreground mb-2">📝 每日综述</div>
-            <div className="text-xs space-y-1">
+          <Card><CardContent className="px-4 py-3">
+            <div className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+              <NotebookPen className="h-3.5 w-3.5" /> 每日综述
+            </div>
+            <div className="text-xs space-y-1 leading-relaxed">
               <div>{review.review}</div>
-              <div className="text-blue-600">{review.focus}</div>
-              <div className="text-red-600">{review.risks}</div>
+              <div className="text-primary">{review.focus}</div>
+              <div className="text-destructive">{review.risks}</div>
             </div>
           </CardContent></Card>
         )}
@@ -363,12 +374,15 @@ export default function DashboardPage() {
 
       {/* 舆情热点 */}
       {hotspots && hotspots.count > 0 && (
-        <Card><CardContent className="p-4">
-          <div className="text-xs font-medium text-red-600 mb-2">🔥 舆情热点 ({hotspots.count})</div>
+        <Card><CardContent className="px-4 py-3">
+          <div className="text-xs font-medium text-destructive mb-2 flex items-center gap-1.5">
+            <Flame className="h-3.5 w-3.5" /> 舆情热点 ({hotspots.count})
+          </div>
           {hotspots.hotspots?.slice(0,5).map((h:any,i:number) => (
-            <div key={i} className="text-xs py-0.5 border-b last:border-0">
-              <span className="font-mono">{h.code}</span> {h.name}
-              <span className="text-red-500 ml-1">({h.cnt}条 情感{h.avg_sentiment?.toFixed(1)})</span>
+            <div key={i} className="text-xs py-1 border-b border-border last:border-0 flex items-center gap-1.5">
+              <span className="font-mono text-muted-foreground">{h.code}</span>
+              <span className="flex-1 truncate">{h.name}</span>
+              <span className="font-mono text-[11px] text-destructive">{h.cnt}条 · 情感 {h.avg_sentiment?.toFixed(1)}</span>
             </div>
           ))}
         </CardContent></Card>
@@ -389,8 +403,9 @@ export default function DashboardPage() {
         return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div>
-              <div className="flex items-center gap-2 mb-3">
-                <h2 className="text-base font-semibold">🏦 价值 Top 3</h2>
+              <div className="flex items-center gap-2 mb-2 border-b border-border pb-1.5">
+                <Landmark className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold">价值 Top 3</h2>
                 <span className="text-[10px] text-muted-foreground">composite_v5（长持/研究）</span>
               </div>
               <div className="grid grid-cols-3 gap-3">
@@ -400,8 +415,9 @@ export default function DashboardPage() {
               </div>
             </div>
             <div>
-              <div className="flex items-center gap-2 mb-3">
-                <h2 className="text-base font-semibold">🚀 动量 Top 3</h2>
+              <div className="flex items-center gap-2 mb-2 border-b border-border pb-1.5">
+                <Rocket className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold">动量 Top 3</h2>
                 <span className="text-[10px] text-muted-foreground">技术×0.45 + 资金×0.40（追涨/轮动）</span>
               </div>
               <div className="grid grid-cols-3 gap-3">
@@ -426,11 +442,11 @@ export default function DashboardPage() {
           <CardHeader><CardTitle className="text-base">操作</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             <button onClick={() => window.open("/api/report/pdf", "_blank")}
-              className="w-full px-4 py-2 bg-red-600 text-white rounded-md text-sm hover:bg-red-700">
-              📄 导出 PDF 报告
+              className="w-full px-3 py-1.5 border border-border rounded-md text-sm hover:bg-muted transition-colors flex items-center justify-center gap-1.5">
+              <FileText className="h-3.5 w-3.5" /> 导出 PDF 报告
             </button>
             <button onClick={() => router.push("/stocks?view=grouped")}
-              className="w-full px-4 py-2 border rounded-md text-sm hover:bg-muted">
+              className="w-full px-3 py-1.5 border border-border rounded-md text-sm hover:bg-muted transition-colors">
               管理股票分组
             </button>
           </CardContent>
@@ -441,9 +457,10 @@ export default function DashboardPage() {
       {v5Rank.length > 0 && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">
-              🏆 V5 评分排名 · A股 ({v5Rank.length}只)
-              {v5CalcDate ? <span className="text-xs font-normal text-muted-foreground ml-2">评分日 {v5CalcDate}</span> : null}
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <Trophy className="h-4 w-4 text-muted-foreground" />
+              V5 评分排名 · A股 ({v5Rank.length}只)
+              {v5CalcDate ? <span className="text-[11px] font-normal font-mono text-muted-foreground ml-2">评分日 {v5CalcDate}</span> : null}
             </CardTitle>
             <button
               onClick={() => exportCsv(
@@ -479,7 +496,7 @@ export default function DashboardPage() {
                       <td className="py-1.5 px-2 font-mono text-xs text-muted-foreground">{i + 1}</td>
                       <td className="py-1.5 px-2 font-mono">{r.code}</td>
                       <td className="py-1.5 px-2">{r.name}</td>
-                      <td className={`py-1.5 px-2 text-right font-bold ${scoreTextClass(r.score ?? r.composite_v5)}`}>
+                      <td className={`py-1.5 px-2 text-right font-mono font-semibold ${scoreTextClass(r.score ?? r.composite_v5)}`}>
                         {(r.score ?? r.composite_v5)?.toFixed(1) ?? "-"}
                       </td>
                       <td className="py-1.5 px-2 text-right">
