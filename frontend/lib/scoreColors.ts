@@ -1,15 +1,17 @@
+// 评分质量 = 单色(强调蓝)顺序标度,不复用 涨跌红绿(功能色),避免语义歧义。
+// 分越高越"实"(强调蓝加粗),越低越"淡"(muted)。
 export function scoreTextClass(v: number | null | undefined): string {
   if (v == null) return "text-muted-foreground";
-  if (v >= 60) return "text-red-600";
-  if (v >= 40) return "text-amber-600";
-  return "text-green-700";
+  if (v >= 60) return "text-primary font-semibold";
+  if (v >= 40) return "text-foreground";
+  return "text-muted-foreground";
 }
 
 export function scoreBgClass(v: number | null | undefined): string {
-  if (v == null) return "bg-muted";
-  if (v >= 60) return "bg-red-50 dark:bg-red-950/30";
-  if (v >= 40) return "bg-amber-50 dark:bg-amber-950/30";
-  return "bg-green-50 dark:bg-green-950/30";
+  if (v == null) return "";
+  if (v >= 60) return "bg-primary/15";
+  if (v >= 40) return "bg-primary/[0.06]";
+  return "bg-muted/30";
 }
 
 export function scoreColor(v: number | null | undefined): string {

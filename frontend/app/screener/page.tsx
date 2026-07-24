@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { scoreTextClass } from "@/lib/scoreColors";
+import { scoreTextClass, scoreBgClass } from "@/lib/scoreColors";
 import { exportCsv } from "@/lib/csvExport";
 import { Filter, RotateCcw, Download, ChevronUp, ChevronDown, PlayCircle } from "lucide-react";
 
@@ -56,20 +56,24 @@ const DIM_LABELS: Record<string, string> = {
 
 const SCORE_COLS = Object.keys(DIM_LABELS);
 
+// 去掉后端预设标签里的装饰 emoji(纯展示层清洗,不改 API 数据)
+const stripEmoji = (s: string) =>
+  s.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "").trim();
+
 const DEFAULT_QUERY: ScreenerQuery = {
   sort_by: "score", sort_dir: "desc", limit: 100, offset: 0,
 };
 
 function scoreCell(v: number | null) {
   if (v == null) return <span className="text-muted-foreground text-xs">—</span>;
-  return <span className={scoreTextClass(v)}>{v.toFixed(1)}</span>;
+  return <span className={`font-mono tabular-nums ${scoreTextClass(v)}`}>{v.toFixed(1)}</span>;
 }
 
 function vetoLabel(v: string | null) {
   if (!v || v === "ok") return null;
   return v === "exclude"
-    ? <span className="text-xs text-gray-500 bg-gray-100 px-1 rounded">回避</span>
-    : <span className="text-xs text-amber-700 bg-amber-50 px-1 rounded">减仓</span>;
+    ? <span className="text-xs text-up font-medium bg-muted px-1 rounded">回避</span>
+    : <span className="text-xs text-amber-700 dark:text-amber-500 bg-amber-500/10 px-1 rounded">减仓</span>;
 }
 
 // ── Range Slider 组件 ────────────────────────────────────
@@ -208,8 +212,8 @@ function ScreenerPage() {
       {/* 标题行 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <Filter className="h-5 w-5" /> 选股筛选
+          <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
+            <Filter className="h-5 w-5 text-muted-foreground" /> 选股筛选
           </h1>
           <p className="text-sm text-muted-foreground">基于 V5 十维评分的多条件筛选</p>
         </div>
@@ -237,27 +241,19 @@ function ScreenerPage() {
       <div className="space-y-1.5">
         {/* M0 三画像预设 */}
         <div className="flex flex-wrap gap-1.5">
-          {presets.filter(p => p.profile).map(p => {
-            const colorMap: Record<string, string> = {
-              value: "border-blue-300 text-blue-800 hover:bg-blue-600 hover:text-white",
-              momentum: "border-orange-300 text-orange-800 hover:bg-orange-500 hover:text-white",
-              dividend: "border-green-300 text-green-800 hover:bg-green-600 hover:text-white",
-            };
-            const cls = colorMap[p.profile!] ?? "border-primary/30 text-primary hover:bg-primary hover:text-primary-foreground";
-            return (
-              <button key={p.id} onClick={() => applyPreset(p)} title={p.desc}
-                className={`text-xs border rounded px-3 py-1.5 transition-colors font-semibold ${cls}`}>
-                {p.label}
-              </button>
-            );
-          })}
+          {presets.filter(p => p.profile).map(p => (
+            <button key={p.id} onClick={() => applyPreset(p)} title={p.desc}
+              className="text-xs border rounded px-3 py-1.5 transition-colors font-semibold border-primary/40 text-primary hover:bg-primary hover:text-primary-foreground">
+              {stripEmoji(p.label)}
+            </button>
+          ))}
         </div>
         {/* 原有预设 */}
         <div className="flex flex-wrap gap-1.5">
           {presets.filter(p => !p.profile).map(p => (
             <button key={p.id} onClick={() => applyPreset(p)} title={p.desc}
               className="text-xs border rounded px-3 py-1.5 hover:bg-primary hover:text-primary-foreground transition-colors font-medium">
-              {p.label}
+              {stripEmoji(p.label)}
             </button>
           ))}
         </div>
@@ -271,7 +267,7 @@ function ScreenerPage() {
             <CardHeader className="py-3 px-4 cursor-pointer flex flex-row items-center justify-between"
               onClick={() => setShowFilters(f => !f)}>
               <CardTitle className="text-xs">评分筛选</CardTitle>
-              <span className="text-xs text-muted-foreground">{showFilters ? "▲" : "▼"}</span>
+              {showFilters ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
             </CardHeader>
             {showFilters && (
               <CardContent className="pb-4 px-4 space-y-4">
@@ -380,9 +376,8 @@ function ScreenerPage() {
                         </td>
                         {SCORE_COLS.map(k => {
                           const v = r[k as keyof StockRow] as number | null;
-                          const bg = v == null ? "" : v >= 70 ? "bg-green-50" : v >= 40 ? "bg-yellow-50" : "bg-red-50";
                           return (
-                            <td key={k} className={`py-1.5 px-2 text-right tabular-nums ${bg}`}>
+                            <td key={k} className={`py-1.5 px-2 text-right tabular-nums ${scoreBgClass(v)}`}>
                               {scoreCell(v)}
                             </td>
                           );
