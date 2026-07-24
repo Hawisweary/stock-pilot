@@ -13,6 +13,7 @@ import {
   ScatterChart, Scatter, ZAxis,
 } from "recharts";
 
+import { AlertTriangle, CheckCircle2, Zap, RotateCw } from "lucide-react";
 import { V5_IC_LABELS, V5_IC_TO_STRATEGY } from "@/lib/v5Strategies";
 import { factorDescription } from "@/lib/factorDescriptions";
 
@@ -78,7 +79,7 @@ function FactorsLabInner() {
   useEffect(() => { loadFactors(); }, []);
 
   const HEALTH_COLOR: Record<string, string> = {
-    strong: "bg-green-500", weak: "bg-amber-400", decayed: "bg-red-500", unknown: "bg-gray-300",
+    strong: "bg-primary", weak: "bg-amber-500", decayed: "bg-destructive", unknown: "bg-muted-foreground/40",
   };
   const HEALTH_LABEL: Record<string, string> = {
     strong: "有效(显著IC)", weak: "减弱(边际)", decayed: "已衰减(IC失效)", unknown: "样本不足",
@@ -274,19 +275,19 @@ function FactorsLabInner() {
           </button>
         ))}
         <button onClick={computeIncremental} disabled={computing}
-          className="text-xs bg-muted px-3 py-1 rounded disabled:opacity-50">
-          {computing ? "…" : "⚡ 增量"}
+          className="text-xs bg-muted px-3 py-1 rounded disabled:opacity-50 inline-flex items-center gap-1">
+          <Zap className="h-3 w-3" /> {computing ? "…" : "增量"}
         </button>
         <button onClick={computeAll} disabled={computing}
-          className="text-xs bg-primary text-primary-foreground px-3 py-1 rounded disabled:opacity-50">
-          {computing ? "计算中…" : "⟳ 全量计算"}
+          className="text-xs bg-primary text-primary-foreground px-3 py-1 rounded disabled:opacity-50 inline-flex items-center gap-1">
+          <RotateCw className={`h-3 w-3 ${computing ? "animate-spin" : ""}`} /> {computing ? "计算中…" : "全量计算"}
         </button>
       </div>
 
       {tab === "library" && (
         <>
           {loadError && (
-            <div className="rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs flex items-center justify-between">
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs flex items-center justify-between">
               <span>因子列表加载失败（后端可能正在重启）</span>
               <button onClick={loadFactors} className="border rounded px-2 py-0.5 hover:bg-muted">重试</button>
             </div>
@@ -305,7 +306,7 @@ function FactorsLabInner() {
               ))}
             </div>
             {decayedCount > 0 && (
-              <span className="text-red-600 font-medium">⚠️ {decayedCount} 个因子已衰减</span>
+              <span className="text-destructive font-medium inline-flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> {decayedCount} 个因子已衰减</span>
             )}
           </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
@@ -370,8 +371,8 @@ function FactorsLabInner() {
                       <div className="flex items-end gap-px h-16 border rounded p-1 bg-muted/20">
                         {(analysis.ic as { ic: number }[]).slice(-30).map((pt, i) => (
                           <div key={i} title={String(pt.ic)}
-                            className={`flex-1 min-w-[2px] ${pt.ic >= 0 ? "bg-red-400" : "bg-green-500"}`}
-                            style={{ height: `${Math.min(100, Math.abs(pt.ic) * 200)}%` }} />
+                            className="flex-1 min-w-[2px]"
+                            style={{ height: `${Math.min(100, Math.abs(pt.ic) * 200)}%`, background: pt.ic >= 0 ? "var(--up)" : "var(--down)" }} />
                         ))}
                       </div>
                     </div>
@@ -409,8 +410,8 @@ function FactorsLabInner() {
                         {((analysis.monotonicity as Record<string, unknown>).group_returns as (number | null)[]).map((r, i) => (
                           <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
                             <div
-                              className={`w-full ${(r ?? 0) >= 0 ? "bg-red-400" : "bg-green-500"}`}
-                              style={{ height: `${Math.min(100, Math.abs(r ?? 0) * 8)}%`, minHeight: r != null ? 2 : 0 }}
+                              className="w-full"
+                              style={{ height: `${Math.min(100, Math.abs(r ?? 0) * 8)}%`, minHeight: r != null ? 2 : 0, background: (r ?? 0) >= 0 ? "var(--up)" : "var(--down)" }}
                               title={r != null ? `${r}%` : "-"}
                             />
                             <span className="text-[9px] text-muted-foreground">G{i + 1}</span>
@@ -485,8 +486,9 @@ function FactorsLabInner() {
                         {heatmap.forward_days.map((d) => {
                           const v = cols[String(d)] ?? 0;
                           const intensity = Math.min(1, Math.abs(v) * 5);
-                          const bg = v >= 0 ? `rgba(239,68,68,${0.1 + intensity * 0.6})` : `rgba(34,197,94,${0.1 + intensity * 0.6})`;
-                          return <td key={d} className="p-1 text-center" style={{ background: bg }}>{v.toFixed(3)}</td>;
+                          const pct = ((0.1 + intensity * 0.6) * 100).toFixed(0);
+                          const bg = `color-mix(in oklab, var(${v >= 0 ? "--up" : "--down"}) ${pct}%, transparent)`;
+                          return <td key={d} className="p-1 text-center font-mono tabular-nums" style={{ background: bg }}>{v.toFixed(3)}</td>;
                         })}
                       </tr>
                     ))}
@@ -512,7 +514,7 @@ function FactorsLabInner() {
               <button onClick={createCustom} className="bg-primary text-primary-foreground px-3 py-1 rounded text-sm">创建并计算</button>
             </div>
             {exprValid && (
-              <p className={`text-xs ${exprValid.valid ? "text-green-700" : "text-red-700"}`}>
+              <p className={`text-xs ${exprValid.valid ? "text-primary" : "text-destructive"}`}>
                 {exprValid.valid ? `✓ ${exprValid.kind}` : exprValid.error}
               </p>
             )}
@@ -573,7 +575,7 @@ function FactorsLabInner() {
                 )}
                 {" · "}
                 门控：
-                <span className={mlValidation.predictions_approved ? "text-green-700 font-semibold" : "text-amber-700"}>
+                <span className={mlValidation.predictions_approved ? "text-primary font-semibold" : "text-amber-700 dark:text-amber-500"}>
                   {(mlValidation.gate as { approved?: boolean })?.approved ? "已放行" : "未放行（仅展示）"}
                 </span>
                 {" · "}
@@ -620,7 +622,7 @@ function FactorsLabInner() {
                       <td className="p-1 font-mono text-[10px] text-muted-foreground truncate max-w-[7rem]" title={mv}>
                         {mv}
                       </td>
-                      <td className="p-1 text-right text-blue-700">{p.composite_v5 != null ? Number(p.composite_v5).toFixed(1) : "—"}</td>
+                      <td className="p-1 text-right text-primary font-mono tabular-nums">{p.composite_v5 != null ? Number(p.composite_v5).toFixed(1) : "—"}</td>
                     </tr>
                   );
                 })}
@@ -643,7 +645,7 @@ function FactorsLabInner() {
                         if (!d) return null;
                         return <div className="bg-white border rounded p-1 text-[10px]">{d.name}: ML {d.ml?.toFixed(1)} / V5 {d.v5?.toFixed(1)}</div>;
                       }} />
-                      <Scatter data={scatterData} fill="#6366f1" opacity={0.7} />
+                      <Scatter data={scatterData} fill="var(--primary)" opacity={0.7} />
                     </ScatterChart>
                   </ResponsiveContainer>
                 </div>
@@ -675,12 +677,12 @@ function FactorsLabInner() {
                 <div>
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={lagData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="lag" tick={{ fontSize: 10 }} label={{ value: "lag(日)", position: "insideBottomRight", offset: -4, fontSize: 9 }} />
                       <YAxis tick={{ fontSize: 10 }} domain={["auto", "auto"]} />
                       <Tooltip formatter={((v: number) => [v.toFixed(4), "Mean IC"]) as any} labelFormatter={((l: unknown) => `Lag ${l}日`) as any} />
                       <ReferenceLine y={0} stroke="#888" strokeDasharray="3 3" />
-                      <Line type="monotone" dataKey="ic" stroke="#6366f1" dot={{ r: 4 }} strokeWidth={2} connectNulls />
+                      <Line type="monotone" dataKey="ic" stroke="var(--primary)" dot={{ r: 4 }} strokeWidth={2} connectNulls />
                     </LineChart>
                   </ResponsiveContainer>
                   <table className="w-full text-left mt-2">
@@ -710,8 +712,11 @@ function FactorsLabInner() {
           <CardContent className="text-xs space-y-3">
             {icReview ? (
               <div className="rounded border p-2 bg-muted/30">
-                <p>IC 审查：{icReview.ic_stable_ready ? "✅ 通过" : "⚠️ 未就绪"}
-                  （稳定因子 {String(icReview.stable_count)}/{String(icReview.min_stable_required)}）</p>
+                <p className="inline-flex items-center gap-1">IC 审查：
+                  {icReview.ic_stable_ready
+                    ? <span className="inline-flex items-center gap-1 text-primary"><CheckCircle2 className="h-3.5 w-3.5" />通过</span>
+                    : <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-500"><AlertTriangle className="h-3.5 w-3.5" />未就绪</span>}
+                  <span className="text-muted-foreground">（稳定因子 {String(icReview.stable_count)}/{String(icReview.min_stable_required)}）</span></p>
                 <ul className="mt-1 space-y-0.5">
                   {((icReview.factors as { factor_id: string; ir: number; stable: boolean }[]) || []).map((f) => (
                     <li key={f.factor_id} className="font-mono">{f.factor_id} IR {f.ir?.toFixed?.(2) ?? f.ir} {f.stable ? "✓" : ""}</li>
