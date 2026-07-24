@@ -27,16 +27,18 @@ interface CalResponse {
   events: CalEvent[];
 }
 
+// 报告类型分类色:暗色安全(opacity底+dark:文字),避开 涨跌红绿(功能色)与 AI紫。
+// 年报=强调蓝(最重), 半年报=琥珀, 一季报=天蓝, 三季报=中性。
 const REPORT_COLORS: Record<string, string> = {
-  annual:       "bg-purple-100 text-purple-700",
-  semi:         "bg-blue-100 text-blue-700",
-  q1:           "bg-green-100 text-green-700",
-  q3:           "bg-amber-100 text-amber-700",
-  q3_quarterly: "bg-amber-100 text-amber-700",
+  annual:       "bg-primary/15 text-primary",
+  semi:         "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  q1:           "bg-sky-500/15 text-sky-700 dark:text-sky-400",
+  q3:           "bg-muted text-foreground/70",
+  q3_quarterly: "bg-muted text-foreground/70",
 };
 
 function reportColor(type: string) {
-  return REPORT_COLORS[type] ?? "bg-gray-100 text-gray-600";
+  return REPORT_COLORS[type] ?? "bg-muted/60 text-muted-foreground";
 }
 
 function groupByDate(events: CalEvent[]): Map<string, CalEvent[]> {
@@ -105,10 +107,10 @@ function CalendarPage() {
   return (
     <div className="space-y-4">
       {/* 标题 */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b border-border pb-3">
         <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <CalendarDays className="h-5 w-5" /> 财报日历
+          <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
+            <CalendarDays className="h-5 w-5 text-muted-foreground" /> 财报日历
           </h1>
           <p className="text-sm text-muted-foreground">
             {data ? `共 ${filtered.length} 条 / 总计 ${data.count} 条` : "加载中…"}
@@ -160,14 +162,14 @@ function CalendarPage() {
         <label className="flex items-center gap-1.5 text-xs cursor-pointer">
           <input type="checkbox" checked={filterAlert} onChange={e => setFilterAlert(e.target.checked)}
             className="rounded" />
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> 仅显示有分数变动
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500" /> 仅显示有分数变动
         </label>
       </div>
 
       {loading ? (
         <div className="grid gap-3">
           {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-24 rounded-xl bg-muted animate-pulse" />
+            <div key={i} className="h-24 rounded-md bg-muted animate-pulse" />
           ))}
         </div>
       ) : viewMode === "timeline" ? (
@@ -201,7 +203,7 @@ function CalendarPage() {
                   {dayEvents.map((e, i) => (
                     <div key={i}
                       onClick={() => router.push(`/stocks/${e.code}`)}
-                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors text-sm ${
+                      className={`flex items-center gap-2 rounded-md border border-border px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors text-sm ${
                         isToday ? "border-primary/40 bg-primary/5" : ""
                       }`}
                     >
@@ -215,7 +217,7 @@ function CalendarPage() {
                       )}
                       <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap">{e.period_end_date.slice(0, 7)}</span>
                       {e.near_alert && (
-                        <TrendingUp className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                        <TrendingUp className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
                       )}
                     </div>
                   ))}
@@ -233,7 +235,7 @@ function CalendarPage() {
           <CardContent className="p-0">
             <div className="overflow-auto max-h-[65vh]">
               <table className="w-full text-xs min-w-[600px]">
-                <thead className="sticky top-0 bg-card border-b">
+                <thead className="sticky top-0 bg-card border-b border-border">
                   <tr className="text-left text-muted-foreground">
                     <th className="py-2 px-3">披露日</th>
                     <th className="py-2 px-2">代码</th>
@@ -248,7 +250,7 @@ function CalendarPage() {
                 <tbody>
                   {filtered.map((e, i) => (
                     <tr key={i}
-                      className={`border-b hover:bg-muted/40 cursor-pointer transition-colors ${e.is_today ? "bg-primary/5" : ""}`}
+                      className={`border-b border-border hover:bg-muted/40 cursor-pointer transition-colors ${e.is_today ? "bg-primary/5" : ""}`}
                       onClick={() => router.push(`/stocks/${e.code}`)}>
                       <td className={`py-1.5 px-3 font-medium ${e.is_today ? "text-primary" : e.is_past ? "text-muted-foreground" : ""}`}>
                         {e.disclosure_date}
@@ -266,7 +268,7 @@ function CalendarPage() {
                         {e.days_until === 0 ? "今天" : e.days_until > 0 ? `${e.days_until}天后` : `${-e.days_until}天前`}
                       </td>
                       <td className="py-1.5 px-2">
-                        {e.near_alert && <TrendingUp className="h-3.5 w-3.5 text-amber-600" />}
+                        {e.near_alert && <TrendingUp className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500" />}
                       </td>
                     </tr>
                   ))}
@@ -362,7 +364,7 @@ function MonthGrid({ events, today, onClickStock }: { events: CalEvent[]; today:
                     )}
                     {/* Hover popup */}
                     {hoveredDate === dateStr && dayEvents.length > 0 && (
-                      <div className="absolute z-20 top-full left-0 mt-1 w-48 bg-popover border rounded-lg shadow-lg p-2 space-y-1">
+                      <div className="absolute z-20 top-full left-0 mt-1 w-48 bg-popover border border-border rounded-md shadow-lg p-2 space-y-1">
                         {dayEvents.map((e, j) => (
                           <div
                             key={j}
