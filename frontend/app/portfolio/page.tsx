@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { Bell, AlertTriangle, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BetaShell, BetaTabs, BETA_TABS } from "@/components/BetaShell";
 import { BetaDualChart } from "@/components/BetaDualChart";
@@ -364,7 +365,7 @@ export default function PortfolioPage() {
                 onClick={() => { select(p.id); setNewName(p.name); setRenaming(true); }}
                 className="text-[10px] text-muted-foreground hover:text-primary"
               >重命名</button>
-              <button onClick={() => removePf(p.id)} className="text-[10px] text-muted-foreground hover:text-red-500">删除</button>
+              <button onClick={() => removePf(p.id)} className="text-[10px] text-muted-foreground hover:text-destructive">删除</button>
             </div>
           </div>
         ))}
@@ -412,9 +413,9 @@ export default function PortfolioPage() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                    <div className="bg-muted rounded p-2"><div className="font-bold">¥{Number(selected.total_value).toLocaleString()}</div>总资产</div>
-                    <div className="bg-muted rounded p-2"><div className="font-bold">¥{Number(selected.cash).toLocaleString()}</div>现金</div>
-                    <div className="bg-muted rounded p-2"><div className={`font-bold ${Number(selected.pnl) >= 0 ? "text-red-600" : "text-green-600"}`}>{selected.pnl_pct}%</div>盈亏</div>
+                    <div className="bg-muted rounded p-2"><div className="font-bold font-mono tabular-nums">¥{Number(selected.total_value).toLocaleString()}</div>总资产</div>
+                    <div className="bg-muted rounded p-2"><div className="font-bold font-mono tabular-nums">¥{Number(selected.cash).toLocaleString()}</div>现金</div>
+                    <div className="bg-muted rounded p-2"><div className={`font-bold font-mono tabular-nums ${Number(selected.pnl) >= 0 ? "text-up" : "text-down"}`}>{selected.pnl_pct}%</div>盈亏</div>
                   </div>
                   {navSeries && navSeries.dates.length > 1 && (
                     <BetaDualChart
@@ -428,11 +429,11 @@ export default function PortfolioPage() {
                     />
                   )}
                   {rebalancePreview?.due && (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
+                    <div className="rounded-md border border-primary/20 bg-primary/5 p-3 space-y-2">
                       <div className="flex items-center justify-between">
-                        <div className="text-xs font-medium text-blue-800 flex items-center gap-1">
-                          🔔 {rebalancePreview.days_left === 0 ? "今日" : "明日"}将自动调仓
-                          <span className="text-blue-500 font-normal ml-1">
+                        <div className="text-xs font-medium text-primary flex items-center gap-1">
+                          <Bell className="h-3.5 w-3.5" /> {rebalancePreview.days_left === 0 ? "今日" : "明日"}将自动调仓
+                          <span className="text-primary/70 font-normal ml-1">
                             （{rebalancePreview.schedule === "weekly" ? "每周" : "每月"}调仓）
                           </span>
                         </div>
@@ -451,25 +452,25 @@ export default function PortfolioPage() {
                           }}
                           className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
                             rebalancePreview.skip_next_rebalance
-                              ? "border-green-400 text-green-700 bg-green-50 hover:bg-green-100"
-                              : "border-red-300 text-red-700 bg-red-50 hover:bg-red-100"
+                              ? "border-border text-muted-foreground bg-muted hover:bg-muted/70"
+                              : "border-amber-500/40 text-amber-700 dark:text-amber-500 hover:bg-amber-500/10"
                           }`}
                         >
                           {rebalancePreview.skip_next_rebalance ? "✓ 已取消，点击恢复" : "取消本次调仓"}
                         </button>
                       </div>
                       {rebalancePreview.skip_next_rebalance && (
-                        <p className="text-[10px] text-blue-500">本次调仓已被取消，系统将跳过并顺延计划。</p>
+                        <p className="text-[10px] text-primary/70">本次调仓已被取消，系统将跳过并顺延计划。</p>
                       )}
                       {!rebalancePreview.skip_next_rebalance && (
                         <div className="grid grid-cols-2 gap-2 text-[11px]">
                           {rebalancePreview.preview_buy.length > 0 && (
                             <div>
-                              <p className="text-green-700 font-medium mb-1">预计买入 ({rebalancePreview.preview_buy.length})</p>
+                              <p className="text-up font-medium mb-1">预计买入 ({rebalancePreview.preview_buy.length})</p>
                               {rebalancePreview.preview_buy.map((s) => (
                                 <div key={s.code} className="flex justify-between text-muted-foreground">
                                   <span><span className="font-mono">{s.code}</span> {s.name}</span>
-                                  <span className="text-green-600 flex gap-2">{s.est_shares != null && <span>{s.est_shares}股</span>}{
+                                  <span className="text-up flex gap-2">{s.est_shares != null && <span>{s.est_shares}股</span>}{
                                     (() => {
                                       const st = rebalancePreview.strategy;
                                       const V5_LABELS: Record<string, string> = {
@@ -491,7 +492,7 @@ export default function PortfolioPage() {
                           )}
                           {rebalancePreview.preview_sell.length > 0 && (
                             <div>
-                              <p className="text-red-700 font-medium mb-1">预计卖出 ({rebalancePreview.preview_sell.length})</p>
+                              <p className="text-down font-medium mb-1">预计卖出 ({rebalancePreview.preview_sell.length})</p>
                               {rebalancePreview.preview_sell.map((s) => (
                                 <div key={s.code} className="flex justify-between text-muted-foreground">
                                   <span><span className="font-mono">{s.code}</span> {s.name}</span>
@@ -508,9 +509,9 @@ export default function PortfolioPage() {
                     </div>
                   )}
                   {scoreAlerts.length > 0 && (
-                    <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 space-y-2">
-                      <div className="text-xs font-medium text-orange-800 flex items-center gap-1">
-                        ⚠️ 触发式调仓信号（{scoreAlerts.length} 只）
+                    <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+                      <div className="text-xs font-medium text-amber-800 dark:text-amber-400 flex items-center gap-1">
+                        <AlertTriangle className="h-3.5 w-3.5" /> 触发式调仓信号（{scoreAlerts.length} 只）
                       </div>
                       {scoreAlerts.map((a) => (
                         <div key={a.code} className="flex items-center justify-between text-xs gap-2">
@@ -519,8 +520,8 @@ export default function PortfolioPage() {
                             <span className="ml-1 text-muted-foreground">{a.name}</span>
                             <span className="ml-2">
                               {a.trigger === "exclude"
-                                ? <span className="text-red-700 font-medium">强否决</span>
-                                : <span className="text-orange-700">{a.score_label ?? "V5"} {a.composite_v5?.toFixed(1) ?? "—"}</span>}
+                                ? <span className="text-destructive font-medium">强否决</span>
+                                : <span className="text-amber-700 dark:text-amber-500">{a.score_label ?? "V5"} {a.composite_v5?.toFixed(1) ?? "—"}</span>}
                             </span>
                           </span>
                           <button
@@ -542,7 +543,7 @@ export default function PortfolioPage() {
                                 setReplacingCode(null);
                               }
                             }}
-                            className="text-[10px] px-2 py-0.5 rounded border border-orange-400 text-orange-700 hover:bg-orange-100 disabled:opacity-50 whitespace-nowrap"
+                            className="text-[10px] px-2 py-0.5 rounded border border-amber-500/40 text-amber-700 dark:text-amber-500 hover:bg-amber-500/10 disabled:opacity-50 whitespace-nowrap"
                           >
                             {replacingCode === a.code ? "替换中…" : "一键替换"}
                           </button>
@@ -667,9 +668,9 @@ export default function PortfolioPage() {
                 </CardHeader>
                 <CardContent className="max-h-96 overflow-auto text-xs">
                   {journal.map((j, i) => (
-                    <div key={i} className="border-b py-1 flex justify-between gap-2">
+                    <div key={i} className="border-b border-border py-1 flex justify-between gap-2 font-mono tabular-nums">
                       <span>{j.trade_date} {j.code} @ {Number(j.price).toFixed(2)}{j.quote_date && j.quote_date !== j.trade_date ? ` (${j.quote_date})` : ""}</span>
-                      <span className={j.action === "BUY" ? "text-red-600 shrink-0" : "text-green-600 shrink-0"}>
+                      <span className={j.action === "BUY" ? "text-up shrink-0" : "text-down shrink-0"}>
                         {j.action === "BUY" ? "买" : "卖"} {j.shares}
                         {j.price_source ? <span className="text-muted-foreground ml-1">{j.price_source === "realtime" ? "实时" : "收盘"}</span> : null}
                         {j.commission != null ? ` · ¥${((j.commission || 0) + (j.tax || 0)).toFixed(2)}` : ""}
@@ -691,14 +692,14 @@ export default function PortfolioPage() {
                   buildSectorWindow={buildSectorWindow} setBuildSectorWindow={setBuildSectorWindow}
                   buildPerSector={buildPerSector} setBuildPerSector={setBuildPerSector}
                   strategies={strategies} combinations={combinations} hideBuild />
-                <button onClick={runCompare} className="bg-indigo-600 text-white text-xs px-3 py-1.5 rounded">运行对比</button>
+                <button onClick={runCompare} className="bg-primary text-primary-foreground text-xs px-3 py-1.5 rounded hover:bg-primary/90 transition-colors">运行对比</button>
               </div>
               {compare && !compare.error && (
                 <>
                   <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                    <div className="bg-muted rounded p-2"><div className="font-bold text-blue-600">{compare.sim_return_pct}%</div>模拟盘</div>
-                    <div className="bg-muted rounded p-2"><div className="font-bold">{compare.backtest_return_pct}%</div>回测</div>
-                    <div className="bg-muted rounded p-2"><div className={`font-bold ${compare.gap_pct >= 0 ? "text-red-600" : "text-green-600"}`}>{compare.gap_pct}%</div>差距</div>
+                    <div className="bg-muted rounded p-2"><div className="font-bold font-mono tabular-nums text-primary">{compare.sim_return_pct}%</div>模拟盘</div>
+                    <div className="bg-muted rounded p-2"><div className="font-bold font-mono tabular-nums">{compare.backtest_return_pct}%</div>回测</div>
+                    <div className="bg-muted rounded p-2"><div className={`font-bold font-mono tabular-nums ${compare.gap_pct >= 0 ? "text-up" : "text-down"}`}>{compare.gap_pct}%</div>差距</div>
                   </div>
                   <BetaDualChart title="模拟盘 vs 回测" strategy={compare.simulated_curve.map((p: {date:string;value:number}) => ({...p, value: p.value/100}))} benchmark={compare.backtest_curve.map((p: {date:string;value:number}) => ({...p, value: p.value/100}))} />
                   {compare.benchmark_curve && compare.benchmark_curve.length > 0 && (
@@ -803,7 +804,7 @@ export default function PortfolioPage() {
 function Stat({ label, value, positive }: { label: string; value: string; positive?: boolean }) {
   return (
     <div className="bg-muted rounded p-2">
-      <div className={`font-bold ${positive === true ? "text-red-600" : positive === false ? "text-green-600" : ""}`}>{value}</div>
+      <div className={`font-bold font-mono tabular-nums ${positive === true ? "text-up" : positive === false ? "text-down" : ""}`}>{value}</div>
       <div className="text-muted-foreground">{label}</div>
     </div>
   );
@@ -873,15 +874,15 @@ function BuildControls(props: {
         </select>
       </label>
       {onPreview && <button onClick={onPreview} className="border text-xs px-2 py-1.5 rounded">预览</button>}
-      {!hideBuild && onBuild && <button onClick={onBuild} className="bg-indigo-600 text-white text-xs px-2 py-1.5 rounded">Top N 建仓</button>}
+      {!hideBuild && onBuild && <button onClick={onBuild} className="bg-primary text-primary-foreground text-xs px-2 py-1.5 rounded hover:bg-primary/90 transition-colors">Top N 建仓</button>}
     </div>
   );
 }
 
 function PricingBanner({ ctx }: { ctx: PricingContext }) {
   const tone = ctx.can_trade
-    ? ctx.mode === "intraday" ? "bg-blue-50 border-blue-200 text-blue-900" : "bg-emerald-50 border-emerald-200 text-emerald-900"
-    : "bg-amber-50 border-amber-200 text-amber-900";
+    ? ctx.mode === "intraday" ? "bg-primary/5 border-primary/20 text-foreground" : "bg-muted border-border text-foreground"
+    : "bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-400";
   return (
     <div className={`text-xs border rounded px-3 py-2 ${tone}`}>
       <div className="font-medium">{ctx.session_label}</div>
@@ -921,15 +922,15 @@ function TradePanel(props: {
       <div className="flex gap-2 items-center">
         <input placeholder="代码" value={tradeCode} onChange={(e) => setTradeCode(e.target.value)} className="flex-1 border rounded px-2 py-1 text-sm" />
         <input type="number" value={tradeShares} onChange={(e) => setTradeShares(+e.target.value)} step={100} min={100} className="w-20 border rounded px-2 py-1 text-sm" />
-        <button onClick={onBuy} className="bg-red-600 text-white px-2 py-1 text-sm rounded">买</button>
-        <button onClick={onSell} className="bg-green-600 text-white px-2 py-1 text-sm rounded">卖</button>
+        <button onClick={onBuy} className="text-white px-2 py-1 text-sm rounded" style={{ background: "var(--up)" }}>买</button>
+        <button onClick={onSell} className="text-white px-2 py-1 text-sm rounded" style={{ background: "var(--down)" }}>卖</button>
       </div>
       {feePreview && tradeCode && (
         <div className="text-[10px] text-muted-foreground space-y-0.5">
           {feePreview.price_label && <p>{feePreview.price_label}{feePreview.quote_date ? ` · 行情日 ${feePreview.quote_date}` : ""}</p>}
           <p>预估：佣金 ¥{feePreview.commission.toFixed(2)} · 合计扣款 ¥{Math.abs(feePreview.cash_delta).toFixed(2)}</p>
           {feePreview.can_trade === false && feePreview.block_reason && (
-            <p className="text-amber-700">当前不可成交：{feePreview.block_reason}</p>
+            <p className="text-amber-700 dark:text-amber-500">当前不可成交：{feePreview.block_reason}</p>
           )}
         </div>
       )}
@@ -940,29 +941,29 @@ function TradePanel(props: {
 function PositionRow({ p, showStop, onSell }: { p: PortfolioPosition; showStop?: boolean; onSell: () => void }) {
   const belowStop = p.turtle_stop_price != null && p.price != null && p.price < p.turtle_stop_price;
   return (
-    <tr className="border-b">
+    <tr className="border-b border-border">
       <td className="py-1">
         <div className="font-mono">{p.code}</div>
         {p.name ? <div className="text-[10px] text-muted-foreground truncate max-w-[88px]" title={p.name}>{p.name}</div> : null}
       </td>
-      <td className="text-center">{p.shares}{p.t1_locked > 0 ? <span className="text-amber-600 ml-0.5" title="T+1">🔒{p.t1_locked}</span> : null}</td>
-      <td className="text-center">
+      <td className="text-center font-mono tabular-nums">{p.shares}{p.t1_locked > 0 ? <span className="text-amber-600 dark:text-amber-500 ml-0.5 inline-flex items-center" title="T+1"><Lock className="h-2.5 w-2.5" />{p.t1_locked}</span> : null}</td>
+      <td className="text-center font-mono tabular-nums">
         {p.price != null ? Number(p.price).toFixed(2) : "—"}
         {p.price_source === "realtime" ? (
-          <div className="text-[9px] text-blue-600">实时</div>
+          <div className="text-[9px] text-primary">实时</div>
         ) : p.quote_date ? (
           <div className="text-[9px] text-muted-foreground" title="库内收盘价">收盘 {p.quote_date.slice(5)}</div>
         ) : null}
       </td>
-      <td className="text-center">{p.avg_cost?.toFixed(2)}</td>
+      <td className="text-center font-mono tabular-nums">{p.avg_cost?.toFixed(2)}</td>
       {showStop && (
-        <td className={`text-center text-[10px] ${belowStop ? "text-amber-700 font-medium" : "text-muted-foreground"}`}>
+        <td className={`text-center text-[10px] font-mono tabular-nums ${belowStop ? "text-amber-700 dark:text-amber-500 font-medium" : "text-muted-foreground"}`}>
           {p.turtle_stop_price != null ? p.turtle_stop_price.toFixed(2) : "—"}
         </td>
       )}
-      <td className="text-center">{p.weight_pct}%</td>
-      <td className={`text-center ${Number(p.pnl) >= 0 ? "text-red-600" : "text-green-600"}`}>{p.pnl_pct}%</td>
-      <td className="text-right">{p.sellable_shares >= 100 && <button onClick={onSell} className="text-[10px] text-green-700 underline">卖</button>}</td>
+      <td className="text-center font-mono tabular-nums">{p.weight_pct}%</td>
+      <td className={`text-center font-mono tabular-nums ${Number(p.pnl) >= 0 ? "text-up" : "text-down"}`}>{p.pnl_pct}%</td>
+      <td className="text-right">{p.sellable_shares >= 100 && <button onClick={onSell} className="text-[10px] text-down underline">卖</button>}</td>
     </tr>
   );
 }
@@ -976,7 +977,8 @@ function NetChart({ data }: { data: { snapshot_date: string; total_value: number
     const vals = data.map((d) => d.total_value);
     const min = Math.min(...vals) * 0.99, max = Math.max(...vals) * 1.01;
     ctx.clearRect(0, 0, W, H);
-    ctx.beginPath(); ctx.strokeStyle = "#6366f1"; ctx.lineWidth = 2;
+    const primary = getComputedStyle(document.documentElement).getPropertyValue("--primary").trim() || "#6366f1";
+    ctx.beginPath(); ctx.strokeStyle = primary; ctx.lineWidth = 2;
     data.forEach((d, i) => {
       const x = 20 + (i / (data.length - 1)) * (W - 40);
       const y = 20 + (1 - (d.total_value - min) / (max - min)) * (H - 40);
