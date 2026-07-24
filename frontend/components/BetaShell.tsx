@@ -21,13 +21,13 @@ export function BetaShell({ title, subtitle, children }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-2 text-xs text-amber-800 dark:text-amber-200">
+      <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-2 text-xs text-amber-800 dark:text-amber-200">
         实验模块 · 基于自选股池 · 结果仅供参考，非投资建议
       </div>
 
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="flex items-start justify-between gap-4 flex-wrap border-b border-border pb-3">
         <div>
-          <h1 className="text-2xl font-bold">{title}</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
           {subtitle && <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>}
         </div>
         <Link href="/data" className="text-xs text-primary flex items-center gap-1 hover:underline">
@@ -56,14 +56,14 @@ function BetaHealthPanel({ health }: { health: BetaHealth }) {
   ];
 
   return (
-    <div className="rounded-lg border bg-card p-3 space-y-2">
+    <div className="rounded-md border border-border bg-card p-3 space-y-2">
       <div className="text-xs font-medium text-muted-foreground">数据前置检查</div>
       <div className="flex flex-wrap gap-2">
         {items.map((it) => (
           <span
             key={it.label}
-            className={`inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-full ${
-              it.ok ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300" : "bg-amber-100 text-amber-800"
+            className={`inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-md ${
+              it.ok ? "bg-primary/10 text-primary" : "bg-amber-500/15 text-amber-700 dark:text-amber-500"
             }`}
           >
             {it.ok ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}

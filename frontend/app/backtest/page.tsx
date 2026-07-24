@@ -15,6 +15,7 @@ import {
 import { BacktestProgress } from "@/components/BacktestProgress";
 import { MonthlyHeatmap } from "@/components/MonthlyHeatmap";
 import { HoldingsPie } from "@/components/HoldingsPie";
+import { Filter } from "lucide-react";
 
 type Tab = "single" | "rolling" | "scan" | "walkforward" | "history";
 
@@ -175,9 +176,9 @@ function BacktestInner() {
       </div>
 
       {fromScreener && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-800 flex items-center gap-2">
-          <span>✦</span>
-          <span>已从选股筛选导入参数：最低分 <strong>{params.min_score}</strong> · 策略 <strong>{params.strategy}</strong></span>
+        <div className="rounded-md border border-primary/20 bg-primary/5 px-4 py-2 text-sm text-primary flex items-center gap-2">
+          <Filter className="h-3.5 w-3.5 shrink-0" />
+          <span>已从选股筛选导入参数：最低分 <strong className="font-mono">{params.min_score}</strong> · 策略 <strong>{params.strategy}</strong></span>
         </div>
       )}
 
@@ -257,7 +258,7 @@ function BacktestInner() {
             )}
             {tab === "single" && result && !result.error && (
               <button disabled={comparing} onClick={runCompare}
-                className="rounded border border-amber-400 text-amber-700 px-4 py-2 text-sm disabled:opacity-50">
+                className="rounded border border-amber-500/50 text-amber-700 dark:text-amber-500 px-4 py-2 text-sm disabled:opacity-50">
                 {comparing ? "对比中…" : "对比回测 B"}
               </button>
             )}
@@ -271,11 +272,11 @@ function BacktestInner() {
 
       <BacktestProgress days={params.days ?? 90} active={loading && tab === "single"} />
 
-      {tab === "single" && result?.error && <p className="text-red-600 text-sm">{result.error}</p>}
+      {tab === "single" && result?.error && <p className="text-destructive text-sm">{result.error}</p>}
       {tab === "single" && result && !result.error && (
         <>
           {result.meta?.warnings?.length ? (
-            <div className="text-xs text-amber-700 bg-amber-50 rounded p-2">{result.meta.warnings.join(" · ")}</div>
+            <div className="text-xs text-amber-700 dark:text-amber-500 bg-amber-500/10 rounded p-2">{result.meta.warnings.join(" · ")}</div>
           ) : null}
           {(result.engine || result.rust_fallback) && (
             <p className="text-xs text-muted-foreground">
@@ -293,20 +294,20 @@ function BacktestInner() {
               ["超额", result.excess_return_pct != null ? `${result.excess_return_pct}%` : "-"],
               ["胜率", `${result.win_rate_pct}%`],
             ].map(([l, v]) => (
-              <Card key={l}><CardContent className="p-2 text-center"><div className="font-bold">{v}</div><div className="text-[10px] text-muted-foreground">{l}</div></CardContent></Card>
+              <Card key={l}><CardContent className="p-2 text-center"><div className="font-bold font-mono tabular-nums">{v}</div><div className="text-[10px] text-muted-foreground">{l}</div></CardContent></Card>
             ))}
           </div>
           {compareResult && !compareResult.error && (
-            <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs space-y-1">
-              <p className="font-medium text-amber-800">策略 B 对比结果</p>
-              <div className="flex flex-wrap gap-4 text-amber-700">
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs space-y-1">
+              <p className="font-medium text-amber-800 dark:text-amber-400">策略 B 对比结果</p>
+              <div className="flex flex-wrap gap-4 text-amber-700 dark:text-amber-500">
                 {[
                   ["总收益", `${compareResult.total_return_pct}%`],
                   ["夏普", String(compareResult.sharpe)],
                   ["回撤", `${compareResult.max_drawdown_pct}%`],
                   ["胜率", `${compareResult.win_rate_pct}%`],
                 ].map(([l, v]) => (
-                  <span key={l}><strong>{v}</strong> {l}</span>
+                  <span key={l}><strong className="font-mono tabular-nums">{v}</strong> {l}</span>
                 ))}
               </div>
             </div>
@@ -341,7 +342,7 @@ function BacktestInner() {
             <CardContent className="flex gap-2 items-center">
               <input placeholder="组合 ID" value={portfolioId} onChange={(e) => setPortfolioId(e.target.value)}
                 className="border rounded px-2 py-1 text-sm w-24" />
-              <button onClick={importPortfolio} className="text-sm bg-indigo-600 text-white px-3 py-1 rounded">按 Top N 建仓</button>
+              <button onClick={importPortfolio} className="text-sm bg-primary text-primary-foreground px-3 py-1 rounded hover:bg-primary/90 transition-colors">按 Top N 建仓</button>
             </CardContent>
           </Card>
         </>
@@ -352,7 +353,7 @@ function BacktestInner() {
           <p>窗口 {String(rolling.windows)} · 胜率 {String(rolling.win_rate)}% · 均收益 {String(rolling.avg_return)}%</p>
           <table className="w-full text-xs"><tbody>
             {(rolling.window_results as Record<string, unknown>[] || []).map((w, i) => (
-              <tr key={i} className="border-b"><td className="py-1">{String(w.period)}</td><td>{String(w.return_pct)}%</td></tr>
+              <tr key={i} className="border-b border-border"><td className="py-1">{String(w.period)}</td><td className="font-mono tabular-nums">{String(w.return_pct)}%</td></tr>
             ))}
           </tbody></table>
         </CardContent></Card>
@@ -362,7 +363,7 @@ function BacktestInner() {
         <Card><CardContent className="p-4 text-xs">
           <table className="w-full"><thead><tr><th>TopN</th><th>最低分</th><th>收益</th><th>Sharpe</th></tr></thead>
             <tbody>{(scan.results as Record<string, unknown>[] || []).map((r, i) => (
-              <tr key={i} className="border-b"><td>{String(r.top_n)}</td><td>{String(r.min_score)}</td><td>{String(r.total_return_pct)}%</td><td>{String(r.sharpe)}</td></tr>
+              <tr key={i} className="border-b border-border font-mono tabular-nums"><td>{String(r.top_n)}</td><td>{String(r.min_score)}</td><td>{String(r.total_return_pct)}%</td><td>{String(r.sharpe)}</td></tr>
             ))}</tbody></table>
         </CardContent></Card>
       )}
@@ -382,7 +383,7 @@ function BacktestInner() {
               const strategy = (r.params as Record<string, unknown>)?.strategy as string;
               const checked = selectedRuns.has(rid);
               return (
-                <div key={rid} className="border-b py-1 flex items-center gap-2">
+                <div key={rid} className="border-b border-border py-1 flex items-center gap-2">
                   <input type="checkbox" checked={checked} onChange={() => {
                     setSelectedRuns((prev) => {
                       const next = new Set(prev);
@@ -390,8 +391,8 @@ function BacktestInner() {
                       return next;
                     });
                   }} />
-                  <span className="flex-1">#{rid} {String(r.created_at).slice(0, 10)} · {strategy}</span>
-                  <span className={Number(r.total_return_pct) >= 0 ? "text-green-700" : "text-red-600"}>
+                  <span className="flex-1 font-mono text-[11px]">#{rid} {String(r.created_at).slice(0, 10)} · {strategy}</span>
+                  <span className={`font-mono tabular-nums ${Number(r.total_return_pct) >= 0 ? "text-up" : "text-down"}`}>
                     {String(r.total_return_pct)}% / Sharpe {Number(r.sharpe).toFixed(2)}
                   </span>
                 </div>
@@ -416,13 +417,13 @@ function BacktestInner() {
                       <YAxis tick={{ fontSize: 10 }} />
                       <Tooltip formatter={((v: number, n: string) => [n === "sharpe" ? v.toFixed(2) : `${v}%`, n === "sharpe" ? "Sharpe" : "总收益"]) as any} />
                       <Legend wrapperStyle={{ fontSize: 10 }} />
-                      <ReferenceLine y={0} stroke="#888" />
+                      <ReferenceLine y={0} stroke="var(--border)" />
                       <Bar dataKey="total_return_pct" name="总收益%" radius={[3,3,0,0]}>
                         {chartData.map((d, i) => (
-                          <Cell key={i} fill={d.total_return_pct >= 0 ? "#22c55e" : "#ef4444"} />
+                          <Cell key={i} fill={d.total_return_pct >= 0 ? "var(--up)" : "var(--down)"} />
                         ))}
                       </Bar>
-                      <Bar dataKey="sharpe" name="Sharpe" fill="#6366f1" radius={[3,3,0,0]} />
+                      <Bar dataKey="sharpe" name="Sharpe" fill="var(--primary)" radius={[3,3,0,0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
