@@ -395,10 +395,10 @@ function StocksPage() {
       const isDown = q.change_pct < 0;
       return (
         <div>
-          <div className={`font-mono text-xs font-bold ${isUp ? "text-red-600" : isDown ? "text-green-600" : ""}`}>
+          <div className={`font-mono tabular-nums text-xs font-bold ${isUp ? "text-up" : isDown ? "text-down" : ""}`}>
             {q.price.toFixed(2)}
           </div>
-          <div className={`text-[10px] ${isUp ? "text-red-500" : isDown ? "text-green-500" : "text-muted-foreground"}`}>
+          <div className={`text-[10px] font-mono tabular-nums ${isUp ? "text-up" : isDown ? "text-down" : "text-muted-foreground"}`}>
             {isUp ? "+" : ""}{q.change_pct.toFixed(2)}%
           </div>
         </div>
@@ -414,13 +414,13 @@ function StocksPage() {
       return (
         <div className="flex flex-wrap items-center gap-0.5">
           {tags.map((ind: string, i: number) => (
-            <span key={i} className="px-1.5 py-0.5 bg-gray-100 rounded text-xs">{ind}</span>
+            <span key={i} className="px-1.5 py-0.5 bg-muted text-foreground/80 rounded text-xs">{ind}</span>
           ))}
           {l2 && (
-            <span className="px-1.5 py-0.5 bg-gray-50 text-muted-foreground rounded text-xs">{l2}</span>
+            <span className="px-1.5 py-0.5 bg-muted/60 text-muted-foreground rounded text-xs">{l2}</span>
           )}
           {l3 && (
-            <span className="px-1.5 py-0.5 bg-gray-50/60 text-muted-foreground/80 rounded text-[11px]">{l3}</span>
+            <span className="px-1.5 py-0.5 bg-muted/40 text-muted-foreground/80 rounded text-[11px]">{l3}</span>
           )}
         </div>
       );
@@ -432,7 +432,7 @@ function StocksPage() {
       return (
         <div className="flex flex-wrap items-center gap-0.5" title={concepts.join("、")}>
           {shown.map((c, i) => (
-            <span key={i} className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{c}</span>
+            <span key={i} className="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs">{c}</span>
           ))}
           {concepts.length > shown.length && (
             <span className="text-[10px] text-muted-foreground">+{concepts.length - shown.length}</span>
@@ -442,11 +442,11 @@ function StocksPage() {
     }},
     { key: "score", header: "综合分", sortable: true, render: (row: any) => {
       const v = row.score ?? row.composite_v5;
-      const bg = v == null ? "" : v >= 70 ? "bg-green-100 text-green-800" : v >= 40 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-800";
+      const bg = v == null ? "text-muted-foreground" : v >= 70 ? "bg-primary/15 text-primary" : v >= 40 ? "bg-muted text-foreground" : "bg-muted/50 text-muted-foreground";
       const pct = v != null ? percentileMap.get(row.id) : undefined;
       return (
         <div className="flex flex-col items-start gap-0.5">
-          <span className={`font-bold px-1.5 py-0.5 rounded text-xs tabular-nums ${bg}`}>
+          <span className={`font-bold font-mono px-1.5 py-0.5 rounded text-xs tabular-nums ${bg}`}>
             {v != null ? Number(v).toFixed(1) : "—"}
           </span>
           {pct != null && (
@@ -459,9 +459,9 @@ function StocksPage() {
     }},
     { key: "veto_status", header: "状态", sortable: true, render: (row: any) => (
       row.veto_status === "exclude" ? (
-        <span className="text-xs text-gray-600">回避</span>
+        <span className="text-xs font-medium text-up">回避</span>
       ) : row.veto_status === "reduce" ? (
-        <span className="text-xs text-amber-600">减仓</span>
+        <span className="text-xs text-amber-600 dark:text-amber-500">减仓</span>
       ) : (
         <span className="text-xs text-muted-foreground">正常</span>
       )
@@ -471,19 +471,19 @@ function StocksPage() {
         <button
           onClick={(e) => { e.stopPropagation(); handleScoreStock(row); }}
           disabled={scoringId === row.id}
-          className="p-1 hover:bg-purple-50 rounded disabled:opacity-40"
+          className="p-1 hover:bg-primary/10 rounded disabled:opacity-40"
           title="V5 评分"
         >
-          <BarChart3 className={`h-3.5 w-3.5 text-purple-500 hover:text-purple-700 ${scoringId === row.id ? "animate-pulse" : ""}`} />
+          <BarChart3 className={`h-3.5 w-3.5 text-primary/70 hover:text-primary ${scoringId === row.id ? "animate-pulse" : ""}`} />
         </button>
-        <button onClick={(e) => { e.stopPropagation(); fetchStockData(row); }} className="p-1 hover:bg-blue-50 rounded" title="抓取数据">
-          <RotateCw className="h-3.5 w-3.5 text-blue-400 hover:text-blue-600" />
+        <button onClick={(e) => { e.stopPropagation(); fetchStockData(row); }} className="p-1 hover:bg-muted rounded" title="抓取数据">
+          <RotateCw className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
         </button>
         <button onClick={(e) => { e.stopPropagation(); openEdit(row); }} className="p-1 hover:bg-muted rounded">
-          <Pencil className="h-3.5 w-3.5" />
+          <Pencil className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
         </button>
-        <button onClick={(e) => { e.stopPropagation(); handleDelete(row); }} className="p-1 hover:bg-red-50 rounded">
-          <Trash2 className="h-3.5 w-3.5 text-red-400 hover:text-red-600" />
+        <button onClick={(e) => { e.stopPropagation(); handleDelete(row); }} className="p-1 hover:bg-muted rounded">
+          <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
         </button>
       </div>
     )},
@@ -491,12 +491,12 @@ function StocksPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between border-b border-border pb-3">
         <div>
-          <h1 className="text-2xl font-bold">股票列表</h1>
+          <h1 className="text-xl font-semibold tracking-tight">股票列表</h1>
           {v5CalcDate && (
             <p className="text-xs text-muted-foreground mt-0.5">
-              V5 评分日 {v5CalcDate} · 与 Dashboard 排名同源
+              V5 评分日 <span className="font-mono">{v5CalcDate}</span> · 与 Dashboard 排名同源
             </p>
           )}
         </div>
@@ -583,7 +583,7 @@ function StocksPage() {
                     {batchAdding ? "添加中..." : "批量添加"}
                   </button>
                   {onboardProgress && (
-                    <span className="text-xs self-center text-blue-600">{onboardProgress}</span>
+                    <span className="text-xs self-center text-primary">{onboardProgress}</span>
                   )}
                   {batchResults.length > 0 && (
                     <span className="text-xs self-center text-muted-foreground">
@@ -619,9 +619,9 @@ function StocksPage() {
 
               {/* 添加进度提示 */}
               {addingMsg && (
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-800">
+                <div className="bg-primary/5 border border-primary/20 rounded-md p-3 text-sm text-primary">
                   <div className="flex items-center gap-2">
-                    <span className="animate-spin inline-block h-3 w-3 border-2 border-blue-600 border-t-transparent rounded-full" />
+                    <span className="animate-spin inline-block h-3 w-3 border-2 border-primary border-t-transparent rounded-full" />
                     <span>{addingMsg}</span>
                   </div>
                 </div>
@@ -641,7 +641,7 @@ function StocksPage() {
           <div className="flex flex-wrap gap-1.5">
             {FILTER_PRESETS.map(p => (
               <button key={p.label} onClick={() => { setActiveFilter(p.label); syncUrl(p.label, viewMode); }}
-                className={`text-xs px-2.5 py-1 rounded-full border transition-colors
+                className={`text-xs px-2.5 py-1 rounded-md border transition-colors
                   ${activeFilter === p.label ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"}`}>
                 <Filter className="inline h-3 w-3 mr-0.5" />
                 {p.label}{p.desc ? ` (${p.desc})` : ""}
@@ -692,9 +692,9 @@ function StocksPage() {
               <label className="text-sm text-muted-foreground">行业（逗号或回车分隔多个）</label>
               <div className="flex flex-wrap gap-1 mb-1">
                 {editIndustries.filter(Boolean).map((ind, i) => (
-                  <span key={i} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs flex items-center gap-1">
+                  <span key={i} className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs flex items-center gap-1">
                     {ind}
-                    <button onClick={() => setEditIndustries(editIndustries.filter((_,j) => j!==i))} className="hover:text-red-500">&times;</button>
+                    <button onClick={() => setEditIndustries(editIndustries.filter((_,j) => j!==i))} className="hover:text-destructive">&times;</button>
                   </span>
                 ))}
               </div>
