@@ -81,7 +81,7 @@ export function MarketOpsButtons({
           type="button"
           disabled={busy !== null}
           onClick={() => run(o.id)}
-          className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 h-7 text-xs hover:bg-muted transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 h-7 text-xs hover:bg-muted transition-colors disabled:opacity-50"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${busy === o.id ? "animate-spin" : ""}`} />
           {busy === o.id ? "处理中…" : o.label}
