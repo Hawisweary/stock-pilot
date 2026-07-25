@@ -276,10 +276,9 @@ export default function DashboardPage() {
       />
       {/* 刷新进度 */}
       {refreshMsg && (
-        <div className={`rounded-lg p-3 flex items-center gap-2 text-sm ${
-          refreshMsg.includes("完成") ? "bg-green-50 border border-green-200 text-green-800" :
-          refreshMsg.includes("失败") || refreshMsg.includes("超时") ? "bg-red-50 border border-red-200 text-red-800" :
-          "bg-blue-50 border border-blue-200 text-blue-800"
+        <div className={`rounded-md p-3 flex items-center gap-2 text-sm border ${
+          refreshMsg.includes("失败") || refreshMsg.includes("超时") ? "bg-destructive/10 border-destructive/20 text-destructive" :
+          "bg-primary/5 border-primary/20 text-primary"
         }`}>
           <RefreshCw className={`h-4 w-4 ${refreshMsg.includes("完成") || refreshMsg.includes("失败") ? "" : "animate-spin"}`} />
           <span className="flex-1">{refreshMsg}</span>
@@ -327,9 +326,9 @@ export default function DashboardPage() {
           <Card><CardContent className="p-4">
             <div className="text-xs text-muted-foreground mb-1">数据质量</div>
             <div className="flex items-center gap-2 text-sm">
-              <span className="w-2 h-2 rounded-full bg-green-500" />{quality.summary?.green||0}
-              <span className="w-2 h-2 rounded-full bg-yellow-500 ml-2" />{quality.summary?.yellow||0}
-              <span className="w-2 h-2 rounded-full bg-red-500 ml-2" />{quality.summary?.red||0}
+              <span className="w-2 h-2 rounded-full bg-primary" />{quality.summary?.green||0}
+              <span className="w-2 h-2 rounded-full bg-amber-500 ml-2" />{quality.summary?.yellow||0}
+              <span className="w-2 h-2 rounded-full bg-destructive ml-2" />{quality.summary?.red||0}
               <span className="text-xs text-muted-foreground ml-2">/ {quality.summary?.total||0}</span>
             </div>
           </CardContent></Card>
@@ -338,7 +337,7 @@ export default function DashboardPage() {
           <Card><CardContent className="p-4">
             <div className="text-xs text-muted-foreground mb-1">宏观环境</div>
             <div className="flex items-center gap-2">
-              <span className={`text-lg font-bold ${macro.score>=60?'text-green-600':macro.score<40?'text-red-600':'text-yellow-600'}`}>{macro.score}分</span>
+              <span className={`text-lg font-bold font-mono tabular-nums ${scoreTextClass(macro.score)}`}>{macro.score}分</span>
               <span className="text-xs">{macro.label}</span>
             </div>
             {macro.indicators && (
@@ -516,9 +515,9 @@ export default function DashboardPage() {
                       </td>
                       <td className="py-1.5 px-2 text-right text-xs">
                         {r.veto_status === "exclude" ? (
-                          <span className="text-gray-600">回避</span>
+                          <span className="text-up font-medium">回避</span>
                         ) : r.veto_status === "reduce" ? (
-                          <span className="text-amber-600">减仓</span>
+                          <span className="text-amber-600 dark:text-amber-500">减仓</span>
                         ) : (
                           <span className="text-muted-foreground">正常</span>
                         )}
@@ -537,11 +536,11 @@ export default function DashboardPage() {
 
 function ScoreDistribution({ scores }: { scores: { score?: number | null; composite_v5?: number | null }[] }) {
   const bands = [
-    { label: "80-100", lo: 80, hi: 100, color: "bg-green-500" },
-    { label: "60-80",  lo: 60, hi: 80,  color: "bg-lime-500" },
-    { label: "40-60",  lo: 40, hi: 60,  color: "bg-yellow-400" },
-    { label: "20-40",  lo: 20, hi: 40,  color: "bg-orange-500" },
-    { label: "0-20",   lo: 0,  hi: 20,  color: "bg-red-500" },
+    { label: "80-100", lo: 80, hi: 100, color: "bg-primary" },
+    { label: "60-80",  lo: 60, hi: 80,  color: "bg-primary/70" },
+    { label: "40-60",  lo: 40, hi: 60,  color: "bg-primary/45" },
+    { label: "20-40",  lo: 20, hi: 40,  color: "bg-primary/25" },
+    { label: "0-20",   lo: 0,  hi: 20,  color: "bg-primary/12" },
   ];
   const counts = bands.map(({ lo, hi }) =>
     scores.filter((s) => { const v = s.score ?? s.composite_v5; return v != null && v >= lo && v < hi; }).length
