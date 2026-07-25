@@ -140,16 +140,22 @@ def fetch_daily_adjusted(ts_code: str, start_date: str, end_date: str) -> list[d
     rows = []
     for _, r in daily.iterrows():
         d = str(r["trade_date"])
-        close = _f(r.get("close"))
+        o, h, l, close = _f(r.get("open")), _f(r.get("high")), _f(r.get("low")), _f(r.get("close"))
         factor = factor_map.get(d)
-        adj_close = round(close * factor / latest_factor, 4) if (close is not None and factor) else close
+        # 前复权系数 = factor / 最新factor;OHLC 同乘,保证 K 线内部一致
+        k = (factor / latest_factor) if factor else None
+        def _adj(v):
+            return round(v * k, 4) if (v is not None and k) else v
         rows.append({
             "trade_date": f"{d[:4]}-{d[4:6]}-{d[6:8]}",
-            "open": _f(r.get("open")),
-            "high": _f(r.get("high")),
-            "low": _f(r.get("low")),
+            "open": o,
+            "high": h,
+            "low": l,
             "close": close,
-            "adj_close": adj_close,
+            "adj_open": _adj(o),
+            "adj_high": _adj(h),
+            "adj_low": _adj(l),
+            "adj_close": _adj(close),
             "volume": _f(r.get("vol")) * 100 if r.get("vol") is not None else None,  # 手->股
             "amount": _f(r.get("amount")) * 1000 if r.get("amount") is not None else None,  # 千元->元
             "change_pct": _f(r.get("pct_chg")),

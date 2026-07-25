@@ -429,10 +429,62 @@ class DataFetcher:
             print(f"[Fetcher] 成交额/换手率补全失败 {code}: {e}")
             return 0
 
+    def _fetch_daily_quotes_tushare(
+        self, stock_id: int, code: str, *, market: str = "A", max_bars: int = 2000
+    ) -> int:
+        """Tushare 日线主源(#60,口径A):全 OHLC 存前复权 qfq,close=adj_close=qfq,
+        与腾讯行语义一致 → 下游读裸 close 零改动。"""
+        start = time.time()
+        try:
+            import datetime as _dt
+            from services.tushare_adapter import code_to_ts_code, fetch_daily_adjusted
+            ts_code = code_to_ts_code(code, market)
+            end = _dt.date.today().strftime("%Y%m%d")
+            start_d = (_dt.date.today() - _dt.timedelta(days=int(max_bars * 1.6) + 30)).strftime("%Y%m%d")
+            trows = fetch_daily_adjusted(ts_code, start_d, end)
+            if not trows:
+                self._log(stock_id, "quotes", "error", 0, error="tushare 空数据",
+                          duration_ms=int((time.time() - start) * 1000), source="tushare")
+                return 0
+            db_rows = []
+            for r in trows[-max_bars:]:
+                vol = r.get("volume")
+                db_rows.append({
+                    "stock_id": stock_id,
+                    "trade_date": r["trade_date"],
+                    # 口径A:OHLC 全部前复权,与腾讯 qfq 对齐
+                    "open": r.get("adj_open"),
+                    "high": r.get("adj_high"),
+                    "low": r.get("adj_low"),
+                    "close": r.get("adj_close"),
+                    "adj_close": r.get("adj_close"),
+                    "volume": int(vol) if vol else 0,
+                    "amount": r.get("amount"),
+                    "change_pct": r.get("change_pct"),
+                })
+            count = self._upsert_batch("stock_daily_quotes", db_rows, ["stock_id", "trade_date"])
+            extras_n = self._enrich_quote_extras(stock_id, code, max_bars=max_bars)
+            self._log(stock_id, "quotes", "success", count,
+                      duration_ms=int((time.time() - start) * 1000),
+                      source="tushare+eastmoney" if extras_n else "tushare")
+            return count
+        except Exception as e:
+            self._log(stock_id, "quotes", "error", 0, error=f"tushare: {str(e)[:200]}",
+                      duration_ms=int((time.time() - start) * 1000), source="tushare")
+            return 0
+
     def _fetch_daily_quotes(
         self, stock_id: int, code: str, *, market: str = "A", max_bars: int = 2000
     ) -> int:
-        """使用腾讯财经获取每日行情（yfinance 为备用源）"""
+        """每日行情主源按 AFR_QUOTE_SOURCE 分派(#60):tushare / tencent(默认)。"""
+        import config
+        if getattr(config, "QUOTE_SOURCE", "tencent") == "tushare":
+            n = self._fetch_daily_quotes_tushare(stock_id, code, market=market, max_bars=max_bars)
+            if n > 0:
+                return n
+            # Tushare 失败 → 回落腾讯(不静默丢数据)
+            print(f"[Fetcher] Tushare 行情失败/空 {code}，回落腾讯")
+
         start = time.time()
 
         # 主源: 腾讯财经 HTTP API（兼容代理，稳定快速）

@@ -70,13 +70,14 @@ def _process_one(
         if not skip_quotes:
             rows = fetch_daily_adjusted(ts_code, start_date, end_date)
             if rows:
+                # 口径A(#60):OHLC 全部存前复权 qfq,close=adj_close,与腾讯行/live 路径一致
                 conn.executemany(
                     """INSERT OR REPLACE INTO stock_daily_quotes
                        (stock_id, trade_date, open, high, low, close, adj_close, volume, amount, change_pct)
                        VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     [
-                        (stock_id, r["trade_date"], r["open"], r["high"], r["low"],
-                         r["close"], r["adj_close"], r["volume"], r["amount"], r["change_pct"])
+                        (stock_id, r["trade_date"], r["adj_open"], r["adj_high"], r["adj_low"],
+                         r["adj_close"], r["adj_close"], r["volume"], r["amount"], r["change_pct"])
                         for r in rows
                     ],
                 )
