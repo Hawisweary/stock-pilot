@@ -75,4 +75,39 @@
 4. **动手节奏**:先只做 Phase 0-2(加 flag + 接线 + shadow 观测,**不切主源**),把 shadow 差异报告给你看了再决定 Phase 3?我建议这样——先看数据,不盲切核心价格源。
 
 ---
-*盘点基于只读代码走查(`data_fetcher`/`quote_sync`/`tushare_adapter`/`data_sources`),未改动任何代码。*
+
+## 6. Phase 2 执行结果(2026-07-25,shadow 已跑)
+
+已加 `AFR_QUOTE_SOURCE` flag(默认 tencent,零行为变更)+ `scripts/tushare_quote_shadow.py`。
+抽样 40 股 × 最近 60 交易日,腾讯 close(qfq) vs Tushare adj_close(qfq):
+
+| 指标 | 值 | kill线 | 结果 |
+|------|-----|--------|------|
+| 复权价相对差 中位 | **0.0000%** | <0.1% | ✅ |
+| P95 | **0.24%** | <0.5% | ✅ |
+| P99 / 最大 | 0.89% / 1.34% | — | 少数股(复权事件附近)偏离,未超 P95 门槛 |
+| 覆盖率 | **100%**(40/40) | ≥99% | ✅ |
+
+**→ 复权口径 kill 线通过。** Tushare adj_close 与腾讯 qfq 在中位上完全吻合。
+
+## 7. 切换前唯一剩下的 gating 任务:`close` 列语义
+
+**发现**:`adj_close` 是全库一致的前复权锚点(`adjust_factor_sync` 保证),但 `close` 列**语义随源变**:
+- 腾讯行:`close` = 前复权 qfq(`transform_to_db_rows` 里 adj_close=close)
+- Tushare 行:`close` = **原始 raw**,`adj_close` = qfq
+
+大多数下游读 `COALESCE(adj_close, close)`(ml_quotes / factor_expression / ic_engine / backtest)→ **切源后不受影响**。
+需逐一审计的是**直接读裸 `close`** 的消费方(约 5-7 处):`risk_scorer`、`capital_scorer`、`sector_rotation`、`sentiment_scorer`、`policy_event_sync`、`score_history_expand`。切 Tushare 后它们拿到的是 raw 而非 qfq。
+
+**两条收尾路线(需你选)**:
+- **A(推荐,零下游风险)**:Tushare 写库时把 `close` 也存成 qfq(= adj_close,同腾讯口径),并把历史 Tushare 回填行的 close 也统一成 qfq。→ 全库 `close` 恒为 qfq,所有下游零改动;raw 若某处需要(如换手=raw价×量)另开 `raw_close` 列。
+- **B**:保留 `close`=raw,逐一改上述 5-7 个裸 close 读取点为 `COALESCE(adj_close, close)`。→ 更"正确"但改动面大、易漏。
+
+## 8. 下一步(待拍板)
+
+1. shadow 已过 → 认可进入切换准备吗?
+2. `close` 语义选 **A(统一 qfq,零下游风险)** 还是 **B(逐点改读 adj_close)**?我倾向 A。
+3. 定了之后:Phase 1 接线(`_fetch_daily_quotes_tushare` + 按 flag 分派)→ 小样本灰度 → 全量切 `AFR_QUOTE_SOURCE=tushare`,一键可回滚。
+
+---
+*盘点基于只读代码走查 + shadow 实测(`data_fetcher`/`quote_sync`/`tushare_adapter`/`adjust_factor_sync`);已加 flag(默认关)与 shadow 脚本,未改动任何 live 取数行为。*

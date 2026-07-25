@@ -27,6 +27,8 @@ API_KEY_REQUIRED = (
 API_KEY = os.getenv("AFR_API_KEY", "")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 TUSHARE_TOKEN = os.getenv("TUSHARE_TOKEN", "")
+# 日线 EOD 批量行情主源(#60):tencent(默认)| tushare。实时现价始终走腾讯,不受此开关影响。
+QUOTE_SOURCE = os.getenv("AFR_QUOTE_SOURCE", "tencent").lower()
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-pro")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
 
