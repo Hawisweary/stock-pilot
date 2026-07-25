@@ -32,7 +32,13 @@ def evaluate_metric_gate(
 ) -> dict[str, Any]:
     path = db_path or DB_PATH
     h = horizon if horizon is not None else ML_DEFAULT_HORIZON
-    runs = get_latest_train_runs(path, horizon=h, limit=ML_GATE_RECENT_FOLDS)
+    # 门控只评估「当前候选模型」——即该 horizon 最新一折的 model_version。
+    # 否则 v1/v2 折混在一起,全历史均值/漂移都算错(v1 长期≈0 会污染 v2 评估，反之亦然)。
+    _latest = get_latest_train_runs(path, horizon=h, limit=1)
+    active_version = _latest[0].get("model_version") if _latest else None
+    runs = get_latest_train_runs(
+        path, horizon=h, limit=ML_GATE_RECENT_FOLDS, model_version=active_version
+    )
     ics = [float(r["oos_rank_ic"]) for r in runs if r.get("oos_rank_ic") is not None]
     n = len(ics)
     mean_ic = sum(ics) / n if n else None
@@ -65,7 +71,7 @@ def evaluate_metric_gate(
 
     # 全历史稳健性：近窗通过还不够——长期无 edge 或时序漂移严重时一律判否，
     # 防止「近期抽样运气」骗过只看近 N 折的门控。
-    all_runs = get_all_train_runs(path, horizon=h)
+    all_runs = get_all_train_runs(path, horizon=h, model_version=active_version)
     all_ics = [float(r["oos_rank_ic"]) for r in all_runs if r.get("oos_rank_ic") is not None]
     full_mean_ic = sum(all_ics) / len(all_ics) if all_ics else None
     drift = None
@@ -92,6 +98,7 @@ def evaluate_metric_gate(
 
     return {
         "horizon": h,
+        "model_version": active_version,
         "gate_passed": passed,
         "recent_folds_requested": ML_GATE_RECENT_FOLDS,
         "folds_with_rank_ic": n,

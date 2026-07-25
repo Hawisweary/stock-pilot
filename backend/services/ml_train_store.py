@@ -102,28 +102,46 @@ def get_latest_train_runs(
     db_path: str,
     horizon: int = 20,
     limit: int = 5,
+    model_version: str | None = None,
 ) -> list[dict]:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     ensure_ml_validation_tables(conn)
-    rows = conn.execute(
-        """SELECT * FROM ml_train_runs WHERE horizon=?
-           ORDER BY id DESC LIMIT ?""",
-        (horizon, limit),
-    ).fetchall()
+    if model_version is not None:
+        rows = conn.execute(
+            """SELECT * FROM ml_train_runs WHERE horizon=? AND model_version=?
+               ORDER BY id DESC LIMIT ?""",
+            (horizon, model_version, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT * FROM ml_train_runs WHERE horizon=?
+               ORDER BY id DESC LIMIT ?""",
+            (horizon, limit),
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def get_all_train_runs(db_path: str, horizon: int = 20) -> list[dict]:
-    """按时间顺序(id 升序)返回某 horizon 的全部 walk-forward 折，用于全历史均值与前后漂移。"""
+def get_all_train_runs(
+    db_path: str, horizon: int = 20, model_version: str | None = None
+) -> list[dict]:
+    """按时间顺序(id 升序)返回某 horizon 的全部 walk-forward 折，用于全历史均值与前后漂移。
+    传 model_version 时只取该版本，避免 v1/v2 折混算。"""
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     ensure_ml_validation_tables(conn)
-    rows = conn.execute(
-        """SELECT * FROM ml_train_runs WHERE horizon=? ORDER BY id ASC""",
-        (horizon,),
-    ).fetchall()
+    if model_version is not None:
+        rows = conn.execute(
+            """SELECT * FROM ml_train_runs WHERE horizon=? AND model_version=?
+               ORDER BY id ASC""",
+            (horizon, model_version),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT * FROM ml_train_runs WHERE horizon=? ORDER BY id ASC""",
+            (horizon,),
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

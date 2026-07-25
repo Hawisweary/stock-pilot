@@ -7,7 +7,7 @@ from services.ml_gate import evaluate_metric_gate, is_ml_predictions_approved
 from services.ml_train_store import ensure_ml_validation_tables, insert_train_run
 
 
-def _seed_runs(db_path: str, ics: list[float]) -> None:
+def _seed_runs(db_path: str, ics: list[float], model_version: str = "lightgbm_h20_wf_v1") -> None:
     conn = sqlite3.connect(db_path)
     ensure_ml_validation_tables(conn)
     for i, ic in enumerate(ics):
@@ -19,7 +19,7 @@ def _seed_runs(db_path: str, ics: list[float]) -> None:
                 "train_end": "2025-01-01",
                 "test_start": f"2025-02-{i+1:02d}",
                 "test_end": f"2025-03-{i+1:02d}",
-                "model_version": "lightgbm_h20_wf_v1",
+                "model_version": model_version,
                 "oos_rank_ic": ic,
                 "fold": i,
             },
@@ -63,6 +63,22 @@ def test_gate_fails_on_full_history_when_recent_lucky():
         assert g["full_mean_rank_ic"] < 0.01     # 全历史不及格
         assert g["gate_passed"] is False
         assert any("full_mean_rank_ic" in r for r in g["failure_reasons"])
+    finally:
+        os.unlink(path)
+
+
+def test_gate_isolates_active_model_version():
+    """v1(长期≈0)与 v2(近窗好)混在一张表:门控只评估最新版本 v2,不被 v1 污染。"""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        _seed_runs(path, [-0.03] * 20, model_version="lightgbm_h20_wf_v1")   # 旧版本长期无效
+        _seed_runs(path, [0.03, 0.028, 0.031, 0.026, 0.03], model_version="lightgbm_h20_wf_v2")
+        g = evaluate_metric_gate(path, horizon=20)
+        assert g["model_version"] == "lightgbm_h20_wf_v2"     # 只认最新版本
+        assert g["total_folds"] == 5                          # 全历史只数 v2 的折，不含 v1 的 20 折
+        assert g["full_mean_rank_ic"] > 0.02                  # v2 全历史(仅 5 折)达标，未被 v1 拖累
+        assert g["gate_passed"] is True
     finally:
         os.unlink(path)
 
