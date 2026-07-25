@@ -7,6 +7,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from services.ml_impute import ImputeTable, WINSOR_BOUNDS, is_valid, winsorize
+
 # 特征名列表（训练向量顺序）
 H5_FEATURES = [
     "pv_corr_5",           # 5日价量相关
@@ -14,6 +16,7 @@ H5_FEATURES = [
     "turnover_mean_5",     # 5日换手均值
     "turnover_std_5",      # 5日换手波动
     "main_net_5d",         # 主力净流入5日累计
+    "miss_main_net_5d",    # 主力流缺失指示
     "vol_5",               # 5日波动率
     "rsi_14",              # RSI 超买超卖
     "amihud_5",            # Amihud 非流动性
@@ -38,6 +41,13 @@ H20_FEATURES = [
     "amp_std_20",          # 20日振幅标准差
     "rs_20_rank",          # 20日相对强度 rank
     "industry_eps_rev",    # 行业 EPS 上修占比
+    "illiq_20",            # 20日 Amihud 非流动性
+    "miss_revenue_yoy_q",
+    "miss_cfo_np",
+    "miss_pe_ttm",
+    "miss_eps_revision_3m",
+    "miss_industry_eps_rev",
+    "miss_margin_chg_20",
 ]
 
 H60_FEATURES = [
@@ -57,6 +67,27 @@ H60_FEATURES = [
     "macro_pmi",           # PMI
     "macro_bond_10y",      # 10Y 国债
     "macro_usd_cnh",       # 汇率
+    "miss_pe_ttm",
+    "miss_pb",
+    "miss_revenue_yoy_q",
+    "miss_cfo_np",
+    "miss_debt_ratio",
+    "miss_eps_revision_3m",
+]
+
+# v3 实验:行业中性(cross-sectional 行业内分位)替换 raw 基本面 + 砍掉 miss flag。
+# 假设:原始 PE/ROE/营收增速的噪声很多来自行业混淆,行业内分位能去掉这层。
+H20_V3_FEATURES = [
+    # 技术核心(沿用 v2)
+    "mom_20_skip5", "ma20_slope", "ma20_dev", "vol_20",
+    "turnover_mean_20", "turnover_chg_20", "pv_corr_20", "macd_hist",
+    "margin_chg_20", "amp_std_20", "rs_20_rank", "illiq_20",
+    # 行业景气 / 分析师修正(沿用)
+    "industry_eps_rev", "eps_revision_3m",
+    # v3 核心:基本面行业内分位(替换 raw revenue_yoy_q / cfo_np,新增 quality)
+    "ind_rank_revenue_yoy_q", "ind_rank_cfo_np", "ind_rank_quality",
+    # 估值 raw 保留(valuation 仅有最新快照,无法做无未来偏差的历史分位)
+    "pe_ttm",
 ]
 
 HORIZON_FEATURE_NAMES: dict[int, list[str]] = {
@@ -66,7 +97,9 @@ HORIZON_FEATURE_NAMES: dict[int, list[str]] = {
 }
 
 
-def feature_names_for(horizon: int) -> list[str]:
+def feature_names_for(horizon: int, variant: str = "v2") -> list[str]:
+    if variant == "v3" and horizon == 20:
+        return list(H20_V3_FEATURES)
     return list(HORIZON_FEATURE_NAMES.get(horizon, H20_FEATURES))
 
 
@@ -193,12 +226,15 @@ class MlFeatureContext:
     industry_eps: dict[tuple[str, str], float] = field(default_factory=dict)
     valuation: dict[int, dict] = field(default_factory=dict)
     macro: dict[str, dict] = field(default_factory=dict)
+    macro_dates: list[str] = field(default_factory=list)
+    impute: ImputeTable = field(default_factory=ImputeTable)
     market_ret: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def load(cls, conn: sqlite3.Connection, dates: list[str]) -> MlFeatureContext:
         ctx = cls()
         date_set = set(dates)
+        impute = ImputeTable()
 
         def _safe(sql: str):
             try:
@@ -216,7 +252,10 @@ class MlFeatureContext:
                WHERE main_net_5d IS NOT NULL"""
         ):
             if dt in date_set:
-                ctx.fund_flow_5d[(int(sid), dt)] = _sf(net5)
+                sid_i = int(sid)
+                ctx.fund_flow_5d[(sid_i, dt)] = _sf(net5)
+                ind = ctx.stock_industry.get(sid_i, "")
+                impute.add("main_net_5d", ind, _sf(net5))
 
         by_sid: dict[int, list] = defaultdict(list)
         for sid, dt, bal in _safe(
@@ -232,12 +271,18 @@ class MlFeatureContext:
         ):
             sid, dt = int(row[0]), row[1]
             if dt in date_set:
-                ctx.v5_metrics[(sid, dt)] = {
+                ind = ctx.stock_industry.get(sid, "")
+                vals = {
                     "revenue_yoy_q": _sf(row[2]),
                     "cfo_np": _sf(row[3]),
                     "debt_ratio": _sf(row[4]),
                     "quality_tier": _sf(row[5], 2),
                 }
+                ctx.v5_metrics[(sid, dt)] = vals
+                for f in ("revenue_yoy_q", "cfo_np", "debt_ratio"):
+                    impute.add(f, ind, vals[f])
+                if is_valid(vals["quality_tier"]):
+                    impute.add("quality_tier", ind, vals["quality_tier"])
 
         for row in _safe(
             """SELECT stock_id, as_of_date, revision_3m_pct FROM stock_eps_forecast
@@ -245,7 +290,10 @@ class MlFeatureContext:
         ):
             sid, dt = int(row[0]), row[1]
             if dt in date_set:
-                ctx.eps_forecast[(sid, dt)] = {"revision_3m_pct": _sf(row[2])}
+                rev = _sf(row[2])
+                ctx.eps_forecast[(sid, dt)] = {"revision_3m_pct": rev}
+                ind = ctx.stock_industry.get(sid, "")
+                impute.add("eps_revision_3m", ind, rev)
 
         for ind, dt, rev in _safe(
             """SELECT industry_sw2, trade_date, revision_3m_pct
@@ -253,6 +301,7 @@ class MlFeatureContext:
         ):
             if dt in date_set:
                 ctx.industry_eps[(str(ind), dt)] = _sf(rev)
+                impute.add("industry_eps_rev", str(ind), _sf(rev))
 
         for row in _safe(
             """SELECT stock_id, pe_ttm, pb, dividend_yield FROM valuation_snapshots
@@ -261,61 +310,128 @@ class MlFeatureContext:
         ):
             sid = int(row[0])
             if sid not in ctx.valuation:
-                ctx.valuation[sid] = {
+                ind = ctx.stock_industry.get(sid, "")
+                val = {
                     "pe_ttm": _sf(row[1]),
                     "pb": _sf(row[2]),
                     "dividend_yield": _sf(row[3]),
                 }
+                ctx.valuation[sid] = val
+                impute.add("pe_ttm", ind, val["pe_ttm"])
+                impute.add("pb", ind, val["pb"])
+                impute.add("dividend_yield", ind, val["dividend_yield"])
 
         for row in _safe(
-            """SELECT date, pmi_manufacturing, bond_yield_10y, usd_cnh FROM macro_indicators"""
+            """SELECT date, pmi_manufacturing, bond_yield_10y, usd_cnh FROM macro_indicators ORDER BY date"""
         ):
             ctx.macro[str(row[0])] = {
                 "pmi": _sf(row[1], 50),
                 "bond_10y": _sf(row[2]),
                 "usd_cnh": _sf(row[3]),
             }
+        ctx.macro_dates = sorted(ctx.macro.keys())
+        impute.finalize()
+        ctx.impute = impute
 
         return ctx
 
-    def _margin_chg(self, stock_id: int, as_of: str, lag: int) -> float:
+    def _margin_chg(self, stock_id: int, as_of: str, lag: int) -> Optional[float]:
         hist = self.margin_by_stock.get(stock_id, [])
         if not hist:
-            return 0.0
+            return None
         cur = next((b for d, b in hist if d <= as_of), None)
         if cur is None or cur <= 0:
-            return 0.0
+            return None
         prior_dates = [d for d, _ in hist if d <= as_of]
         if len(prior_dates) <= lag:
-            return 0.0
+            return None
         prior_dt = prior_dates[-lag - 1] if len(prior_dates) > lag else prior_dates[0]
         prior = next((b for d, b in hist if d == prior_dt), cur)
         if prior <= 0:
-            return 0.0
+            return None
         return (cur / prior - 1) * 100
+
+    def _macro_at(self, as_of: str) -> dict[str, float]:
+        if not self.macro_dates:
+            return {"pmi": 50.0, "bond_10y": 0.0, "usd_cnh": 0.0}
+        idx = next((i for i, d in enumerate(self.macro_dates) if d > as_of), len(self.macro_dates))
+        dt = self.macro_dates[max(0, idx - 1)]
+        m = self.macro.get(dt, {})
+        return {
+            "pmi": m.get("pmi", 50.0),
+            "bond_10y": m.get("bond_10y", 0.0),
+            "usd_cnh": m.get("usd_cnh", 0.0),
+        }
+
+    def _fill_field(
+        self,
+        stock_id: int,
+        field: str,
+        raw: Any,
+        *,
+        miss_key: str,
+        out: dict[str, float],
+    ) -> None:
+        ind = self.stock_industry.get(stock_id, "")
+        if is_valid(raw):
+            lo, hi = WINSOR_BOUNDS.get(field, (-1e9, 1e9))
+            out[field] = winsorize(float(raw), lo, hi)
+            out[miss_key] = 0.0
+        else:
+            out[field] = self.impute.lookup(field, ind)
+            out[miss_key] = 1.0
 
     def _aux(self, stock_id: int, as_of: str) -> dict[str, float]:
         v5 = self.v5_metrics.get((stock_id, as_of), {})
         eps = self.eps_forecast.get((stock_id, as_of), {})
         val = self.valuation.get(stock_id, {})
         ind = self.stock_industry.get(stock_id, "")
-        macro = self.macro.get(as_of, self.macro.get(max(self.macro.keys(), default=""), {}))
-        return {
-            "revenue_yoy_q": v5.get("revenue_yoy_q", 0.0),
-            "cfo_np": v5.get("cfo_np", 0.0),
-            "debt_ratio": v5.get("debt_ratio", 0.0),
-            "roe_proxy": v5.get("quality_tier", 2.0) * 10,
-            "eps_revision_3m": eps.get("revision_3m_pct", 0.0),
-            "industry_eps_rev": self.industry_eps.get((ind, as_of), 0.0),
-            "pe_ttm": val.get("pe_ttm", 0.0),
-            "pb": val.get("pb", 0.0),
-            "dividend_yield": val.get("dividend_yield", 0.0),
-            "main_net_5d": self.fund_flow_5d.get((stock_id, as_of), 0.0),
-            "margin_chg_20": self._margin_chg(stock_id, as_of, 20),
-            "macro_pmi": macro.get("pmi", 50.0),
-            "macro_bond_10y": macro.get("bond_10y", 0.0),
-            "macro_usd_cnh": macro.get("usd_cnh", 0.0),
-        }
+        macro = self._macro_at(as_of)
+        out: dict[str, float] = {}
+
+        self._fill_field(stock_id, "revenue_yoy_q", v5.get("revenue_yoy_q"), miss_key="miss_revenue_yoy_q", out=out)
+        self._fill_field(stock_id, "cfo_np", v5.get("cfo_np"), miss_key="miss_cfo_np", out=out)
+        self._fill_field(stock_id, "debt_ratio", v5.get("debt_ratio"), miss_key="miss_debt_ratio", out=out)
+        out["roe_proxy"] = (
+            v5.get("quality_tier", 2.0) * 10
+            if v5 and is_valid(v5.get("quality_tier"))
+            else self.impute.lookup("quality_tier", ind) * 10
+        )
+        self._fill_field(stock_id, "eps_revision_3m", eps.get("revision_3m_pct"), miss_key="miss_eps_revision_3m", out=out)
+        self._fill_field(
+            stock_id,
+            "industry_eps_rev",
+            self.industry_eps.get((ind, as_of)),
+            miss_key="miss_industry_eps_rev",
+            out=out,
+        )
+        self._fill_field(stock_id, "pe_ttm", val.get("pe_ttm"), miss_key="miss_pe_ttm", out=out)
+        self._fill_field(stock_id, "pb", val.get("pb"), miss_key="miss_pb", out=out)
+        self._fill_field(stock_id, "dividend_yield", val.get("dividend_yield"), miss_key="miss_dividend_yield", out=out)
+        self._fill_field(
+            stock_id,
+            "main_net_5d",
+            self.fund_flow_5d.get((stock_id, as_of)),
+            miss_key="miss_main_net_5d",
+            out=out,
+        )
+        mchg = self._margin_chg(stock_id, as_of, 20)
+        self._fill_field(stock_id, "margin_chg_20", mchg, miss_key="miss_margin_chg_20", out=out)
+
+        for mk, mv in (
+            ("macro_pmi", macro["pmi"]),
+            ("macro_bond_10y", macro["bond_10y"]),
+            ("macro_usd_cnh", macro["usd_cnh"]),
+        ):
+            field = mk.replace("macro_", "")
+            if field == "pmi":
+                out[mk] = float(mv) if is_valid(mv) else 50.0
+            elif is_valid(mv):
+                lo, hi = WINSOR_BOUNDS.get(f"macro_{field}", (-1e9, 1e9))
+                out[mk] = winsorize(float(mv), lo, hi)
+            else:
+                out[mk] = 0.0
+        return out
 
 
 def _slice_bars(bars: list[QuoteBar], i: int) -> dict[str, list[float]]:
@@ -355,6 +471,7 @@ def compute_base_features(
         else:
             out["turnover_std_5"] = 0.0
         out["main_net_5d"] = aux["main_net_5d"]
+        out["miss_main_net_5d"] = aux["miss_main_net_5d"]
         out["vol_5"] = _volatility(c, 5) * 100
         out["rsi_14"] = _rsi(c, 14)
         out["amihud_5"] = _amihud(c, a, 5)
@@ -380,24 +497,41 @@ def compute_base_features(
         out["pv_corr_20"] = _rolling_corr(c, v, 20)
         out["macd_hist"] = _macd_hist(c)
         out["margin_chg_20"] = aux["margin_chg_20"]
+        out["miss_margin_chg_20"] = aux["miss_margin_chg_20"]
         out["revenue_yoy_q"] = aux["revenue_yoy_q"]
+        out["miss_revenue_yoy_q"] = aux["miss_revenue_yoy_q"]
         out["cfo_np"] = aux["cfo_np"]
+        out["miss_cfo_np"] = aux["miss_cfo_np"]
         out["eps_revision_3m"] = aux["eps_revision_3m"]
+        out["miss_eps_revision_3m"] = aux["miss_eps_revision_3m"]
         out["pe_ttm"] = aux["pe_ttm"]
+        out["miss_pe_ttm"] = aux["miss_pe_ttm"]
         out["amp_std_20"] = _amp_std(h, l, c, 20) * 100
         out["mom_20"] = _pct_ret(c, 20) * 100
         out["industry_eps_rev"] = aux["industry_eps_rev"]
+        out["miss_industry_eps_rev"] = aux["miss_industry_eps_rev"]
+        out["illiq_20"] = _amihud(c, a, 20)
+        # v3 行业中性用:携带行业 + 原始 quality_tier(revenue_yoy_q/cfo_np 已在 out 上)
+        out["_industry"] = ctx.stock_industry.get(stock_id, "")
+        _qt = ctx.v5_metrics.get((stock_id, dt), {}).get("quality_tier")
+        out["_quality_tier"] = _sf(_qt) if is_valid(_qt) else float("nan")
 
     elif horizon == 60:
         out["pe_ttm"] = aux["pe_ttm"]
+        out["miss_pe_ttm"] = aux["miss_pe_ttm"]
         out["pb"] = aux["pb"]
+        out["miss_pb"] = aux["miss_pb"]
         out["dividend_yield"] = aux["dividend_yield"]
-        out["roe_proxy"] = aux["roe_proxy"]
         out["revenue_yoy_q"] = aux["revenue_yoy_q"]
+        out["miss_revenue_yoy_q"] = aux["miss_revenue_yoy_q"]
         out["cfo_np"] = aux["cfo_np"]
+        out["miss_cfo_np"] = aux["miss_cfo_np"]
         out["debt_ratio"] = aux["debt_ratio"]
+        out["miss_debt_ratio"] = aux["miss_debt_ratio"]
         out["eps_revision_3m"] = aux["eps_revision_3m"]
+        out["miss_eps_revision_3m"] = aux["miss_eps_revision_3m"]
         out["industry_eps_rev"] = aux["industry_eps_rev"]
+        out["roe_proxy"] = aux["roe_proxy"]
         mom12 = _pct_ret(c, min(250, len(c) - 1))
         mom1 = _pct_ret(c, min(20, len(c) - 1))
         out["mom_12m_skip1m"] = (mom12 - mom1) * 100
@@ -417,13 +551,36 @@ def compute_base_features(
     return out
 
 
+def _industry_percentile(rows: list[dict], raw_key: str, out_key: str) -> None:
+    """就地写入行业内分位 [0,1]:同行业中 <= 本值的占比;缺失(NaN)/无行业→0.5 中性。"""
+    groups: dict[str, list[int]] = defaultdict(list)
+    for idx, r in enumerate(rows):
+        v = r.get(raw_key)
+        if v is not None and isinstance(v, (int, float)) and math.isfinite(v):
+            groups[str(r.get("_industry", ""))].append(idx)
+    ranks = {}
+    for _ind, idxs in groups.items():
+        vals = [rows[j][raw_key] for j in idxs]
+        n = len(vals)
+        for j in idxs:
+            vj = rows[j][raw_key]
+            ranks[j] = (sum(1 for x in vals if x <= vj) / n) if n else 0.5
+    for idx, r in enumerate(rows):
+        r[out_key] = ranks.get(idx, 0.5)
+
+
 def apply_cross_section_ranks(
     rows: list[dict[str, float]],
     horizon: int,
+    variant: str = "v2",
 ) -> None:
     """就地补充横截面 rank 特征。"""
     if not rows:
         return
+    if variant == "v3" and horizon == 20:
+        _industry_percentile(rows, "revenue_yoy_q", "ind_rank_revenue_yoy_q")
+        _industry_percentile(rows, "cfo_np", "ind_rank_cfo_np")
+        _industry_percentile(rows, "_quality_tier", "ind_rank_quality")
     if horizon == 5:
         moms = [r.get("mom_5", 0.0) for r in rows]
         turns = [r.get("turnover_mean_5_raw", 0.0) for r in rows]
@@ -460,8 +617,8 @@ def apply_cross_section_ranks(
             r.pop("_rets60", None)
 
 
-def vectorize(feat: dict[str, float], horizon: int) -> list[float]:
-    names = feature_names_for(horizon)
+def vectorize(feat: dict[str, float], horizon: int, variant: str = "v2") -> list[float]:
+    names = feature_names_for(horizon, variant)
     return [_sf(feat.get(n)) for n in names]
 
 

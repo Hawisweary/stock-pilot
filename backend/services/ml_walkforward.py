@@ -22,6 +22,7 @@ from services.ml_feature_sets import (
 )
 from services.ml_metrics import long_short_return, pearson_ic, rmse, spearman_rank_ic
 from services.ml_train_store import (
+    configure_sqlite_conn,
     ensure_ml_validation_tables,
     insert_train_run,
     upsert_oos_daily,
@@ -62,6 +63,7 @@ def _build_cross_section(
     forward_days: int,
     *,
     with_labels: bool = False,
+    variant: str = "v2",
 ) -> list[LabeledSample]:
     lookback = LOOKBACK_BY_HORIZON.get(forward_days, 30)
     d_idx = _date_to_idx(dates)
@@ -89,7 +91,7 @@ def _build_cross_section(
     if len(pending) < 2:
         return []
     batches = [p[1] for p in pending]
-    apply_cross_section_ranks(batches, forward_days)
+    apply_cross_section_ranks(batches, forward_days, variant)
     for (sid, _feats, label), feats in zip(pending, batches):
         y = float(label) if label is not None else 0.0
         out.append(
@@ -97,7 +99,7 @@ def _build_cross_section(
                 stock_id=sid,
                 feature_date=pred_date,
                 feature_idx=fi,
-                x=vectorize(feats, forward_days),
+                x=vectorize(feats, forward_days, variant),
                 y=y,
             )
         )
@@ -113,6 +115,7 @@ def _collect_train_samples(
     train_start_idx: int,
     train_end_idx: int,
     test_feature_idx: int,
+    variant: str = "v2",
 ) -> list[LabeledSample]:
     lookback = LOOKBACK_BY_HORIZON.get(forward_days, 30)
     min_bars = _min_bars(forward_days)
@@ -143,7 +146,7 @@ def _collect_train_samples(
             meta.append((sid, label))
         if len(batch) < 2:
             continue
-        apply_cross_section_ranks(batch, forward_days)
+        apply_cross_section_ranks(batch, forward_days, variant)
         fi = d_idx[dt]
         for feats, (sid, lab) in zip(batch, meta):
             samples.append(
@@ -151,7 +154,7 @@ def _collect_train_samples(
                     stock_id=sid,
                     feature_date=dt,
                     feature_idx=fi,
-                    x=vectorize(feats, forward_days),
+                    x=vectorize(feats, forward_days, variant),
                     y=float(lab),
                 )
             )
@@ -214,6 +217,7 @@ def run_h20_walkforward(
     step_days: int = WF_STEP_DAYS,
     forward_days: int = 20,
     max_folds: int | None = 12,
+    variant: str = "v2",
 ) -> dict[str, Any]:
     by_code, code_to_id, dates = load_quote_panel(db_path)
     if len(dates) < WF_MIN_HISTORY_DAYS:
@@ -225,6 +229,7 @@ def run_h20_walkforward(
         }
 
     conn = sqlite3.connect(db_path)
+    configure_sqlite_conn(conn)
     ctx = MlFeatureContext.load(conn, dates)
     ensure_ml_validation_tables(conn)
     conn.execute(
@@ -235,7 +240,7 @@ def run_h20_walkforward(
         )"""
     )
 
-    feat_names = feature_names_for(forward_days)
+    feat_names = feature_names_for(forward_days, variant)
     folds_run = 0
     fold_metrics: list[dict] = []
     windows = list(
@@ -260,6 +265,7 @@ def run_h20_walkforward(
             win.train_start_idx,
             win.train_end_idx,
             win.test_feature_idx,
+            variant=variant,
         )
         if len(train_samples) < MIN_TRAIN_SAMPLES:
             continue
@@ -297,6 +303,7 @@ def run_h20_walkforward(
             win.test_date,
             forward_days,
             with_labels=True,
+            variant=variant,
         )
         if len(oos) < 10:
             continue
@@ -308,7 +315,7 @@ def run_h20_walkforward(
         ic = pearson_ic(preds, labels)
         ls = long_short_return(preds, labels)
 
-        mv = f"{mode}_h{forward_days}_wf_v1"
+        mv = f"{mode}_h{forward_days}_wf_{variant}"
         insert_train_run(
             conn,
             {
@@ -364,6 +371,7 @@ def run_h20_walkforward(
             train_start_idx,
             last_win_train_end,
             pseudo_test,
+            variant=variant,
         )
         if len(all_train) >= MIN_TRAIN_SAMPLES:
             sorted_fi = sorted({s.feature_idx for s in all_train})
@@ -386,7 +394,8 @@ def run_h20_walkforward(
                 live_mv = f"{mode}_h{forward_days}_wf_live"
                 pred_date = dates[-1]
                 live = _build_cross_section(
-                    by_code, code_to_id, dates, ctx, pred_date, forward_days, with_labels=False
+                    by_code, code_to_id, dates, ctx, pred_date, forward_days,
+                    with_labels=False, variant=variant,
                 )
                 if live:
                     X_live = np.array([s.x for s in live], dtype=np.float32)
