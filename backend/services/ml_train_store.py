@@ -6,7 +6,14 @@ import sqlite3
 from typing import Any, Optional
 
 
+def configure_sqlite_conn(conn: sqlite3.Connection, *, busy_timeout_ms: int = 120_000) -> None:
+    """WAL + 长 busy_timeout，减轻 WF 长任务与后端并发写锁。"""
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
+
+
 def ensure_ml_validation_tables(conn: sqlite3.Connection) -> None:
+    configure_sqlite_conn(conn)
     conn.execute(
         """CREATE TABLE IF NOT EXISTS ml_train_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,6 +110,19 @@ def get_latest_train_runs(
         """SELECT * FROM ml_train_runs WHERE horizon=?
            ORDER BY id DESC LIMIT ?""",
         (horizon, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_all_train_runs(db_path: str, horizon: int = 20) -> list[dict]:
+    """按时间顺序(id 升序)返回某 horizon 的全部 walk-forward 折，用于全历史均值与前后漂移。"""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    ensure_ml_validation_tables(conn)
+    rows = conn.execute(
+        """SELECT * FROM ml_train_runs WHERE horizon=? ORDER BY id ASC""",
+        (horizon,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]

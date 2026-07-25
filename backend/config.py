@@ -146,6 +146,13 @@ ML_GATE_MIN_FOLDS = int(os.getenv("AFR_ML_GATE_MIN_FOLDS", "3"))
 ML_GATE_MIN_MEAN_RANK_IC = float(os.getenv("AFR_ML_GATE_MIN_RANK_IC", "0.02"))
 _ml_gate_max_std = os.getenv("AFR_ML_GATE_MAX_RANK_IC_STD", "").strip()
 ML_GATE_MAX_RANK_IC_STD = float(_ml_gate_max_std) if _ml_gate_max_std else None
+# 全历史稳健性门控（近窗易被时序漂移/抽样运气骗）：
+#   - 全历史均值 RankIC 下限：长期无排序能力（≈0）直接判否
+#   - 前后折漂移上限：|后K折均值 - 前K折均值|，过大说明近窗不代表全历史
+ML_GATE_MIN_FULL_MEAN_RANK_IC = float(os.getenv("AFR_ML_GATE_MIN_FULL_MEAN_RANK_IC", "0.01"))
+_ml_gate_max_drift = os.getenv("AFR_ML_GATE_MAX_DRIFT", "0.05").strip()
+ML_GATE_MAX_DRIFT = float(_ml_gate_max_drift) if _ml_gate_max_drift else None
+ML_GATE_DRIFT_FOLDS = int(os.getenv("AFR_ML_GATE_DRIFT_FOLDS", "5"))
 # ML 多 horizon 独立模型（方案 A）：5/20/60 日未来收益
 ML_HORIZONS = tuple(
     int(x) for x in os.getenv("AFR_ML_HORIZONS", "5,20,60").split(",") if x.strip().isdigit()
