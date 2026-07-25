@@ -38,6 +38,8 @@ def resolve_model_version_for_horizon(
     """优先 WF live 模型，其次 legacy lightgbm/ridge，最后 demo。"""
     patterns = [
         f"%_h{horizon}_wf_live",
+        f"lightgbm_h{horizon}_wf_v2",
+        f"ridge_h{horizon}_wf_v2",
         f"lightgbm_h{horizon}_wf_v1",
         f"ridge_h{horizon}_wf_v1",
         f"lightgbm_h{horizon}",
