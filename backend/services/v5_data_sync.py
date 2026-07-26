@@ -20,6 +20,7 @@ from services.policy_event_sync import sync_policy_v5
 from services.data_quality import detect_and_write
 from services.market_regime import sync_regime
 from services.ml_impute import impute_v5_tables
+from services.volatility_forecast import sync_forecast
 from services.quality_metrics_calc import compute_all_v5_metrics
 from services.risk_scanner import scan_risk_flags
 from services.sector_fund_flow_sync import sync_sector_fund_flow
@@ -156,6 +157,7 @@ def sync_v5_data_sources(
     tushare_event_days: int = 10,
     announcement_limit: int = 30,
     news_limit: int = 15,
+    skip_volatility_forecast: bool = False,
 ) -> dict:
     """同步 V5 评分数据源（含公告/新闻抓取、事件分类、EPS/风险/政策/情绪）。"""
     preset = V5_SYNC_MODE_PRESETS.get(mode or "", {})
@@ -183,6 +185,7 @@ def sync_v5_data_sources(
         "skip_per_stock": skip_per_stock,
         "announcement_limit": announcement_limit,
         "news_limit": news_limit,
+        "skip_volatility_forecast": skip_volatility_forecast,
     }
     opts = {**locals_snapshot, **preset}
     if stock_ids is not None:
@@ -256,6 +259,14 @@ def sync_v5_data_sources(
             result["steps"]["data_quality"] = detect_and_write(conn)
     except Exception as e:
         result["steps"]["data_quality"] = {"error": str(e)}
+
+    if not opts["skip_volatility_forecast"]:
+        try:
+            with sqlite3.connect(config.DB_PATH, timeout=120) as conn:
+                conn.execute("PRAGMA busy_timeout=30000")
+                result["steps"]["volatility_forecast"] = sync_forecast(conn)
+        except Exception as e:
+            result["steps"]["volatility_forecast"] = {"error": str(e)}
 
     if not opts["skip_eps_revision"]:
         try:

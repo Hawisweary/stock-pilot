@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 52
+CURRENT_SCHEMA_VERSION = 53
 
 MIGRATIONS: list[tuple[int, str]] = [
     (2, """
@@ -1113,6 +1113,25 @@ MIGRATIONS: list[tuple[int, str]] = [
             updated_at          TEXT    NOT NULL DEFAULT (datetime('now'))
         );
         CREATE INDEX IF NOT EXISTS idx_market_regime_date ON market_regime_daily(trade_date DESC);
+    """),
+    (53, """
+        -- 个股波动率 / 流动性预测
+        CREATE TABLE IF NOT EXISTS volatility_forecast_daily (
+            stock_id            INTEGER NOT NULL,
+            trade_date          TEXT    NOT NULL,
+            realized_vol_20     REAL,
+            realized_vol_60     REAL,
+            avg_turnover_20     REAL,
+            avg_amount_20       REAL,
+            amihud_illiq_20     REAL,
+            forecast_vol_20     REAL,
+            forecast_horizon    INTEGER NOT NULL DEFAULT 20,
+            forecast_method     TEXT    NOT NULL DEFAULT 'ewma',
+            updated_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (stock_id, trade_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_vol_forecast_date ON volatility_forecast_daily(trade_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_vol_forecast_stock ON volatility_forecast_daily(stock_id, trade_date DESC);
     """),
 ]
 

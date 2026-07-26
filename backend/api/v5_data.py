@@ -504,3 +504,37 @@ async def market_regime_sync(trade_date: str | None = None):
 
     conn = get_db_conn()
     return sync_regime(conn, trade_date=trade_date)
+
+
+@router.get("/volatility-forecast")
+async def volatility_forecast_summary(trade_date: str | None = None):
+    """获取波动率 / 流动性预测摘要（平均值、TOP20 高波动）。"""
+    from database import get as get_db_conn
+    from services.volatility_forecast import get_summary_for_date, sync_forecast
+
+    conn = get_db_conn()
+    if trade_date:
+        row = get_summary_for_date(conn, trade_date)
+        if row.get("total_records"):
+            return row
+    return sync_forecast(conn, trade_date=trade_date)
+
+
+@router.get("/volatility-forecast/{stock_id}")
+async def volatility_forecast_stock(stock_id: int, limit: int = Query(30, ge=1, le=365)):
+    """获取某只股票的历史波动率 / 流动性预测。"""
+    from database import get as get_db_conn
+    from services.volatility_forecast import get_forecast_for_stock
+
+    conn = get_db_conn()
+    return {"stock_id": stock_id, "forecasts": get_forecast_for_stock(conn, stock_id, limit)}
+
+
+@router.post("/volatility-forecast/sync")
+async def volatility_forecast_sync(trade_date: str | None = None):
+    """手动触发波动率 / 流动性预测计算。"""
+    from database import get as get_db_conn
+    from services.volatility_forecast import sync_forecast
+
+    conn = get_db_conn()
+    return sync_forecast(conn, trade_date=trade_date)
