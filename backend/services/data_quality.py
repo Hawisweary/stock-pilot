@@ -25,7 +25,7 @@ SEVERITY_THRESHOLDS = {
 
 MAX_SCORE = 100.0
 
-# 各规则权重
+    # 各规则权重
 _RULE_WEIGHTS: dict[str, int] = {
     "price_spike": 30,           # 涨跌幅异常
     "price_gap": 25,             # 日内跳空
@@ -37,6 +37,11 @@ _RULE_WEIGHTS: dict[str, int] = {
     "pb_extreme": 25,            # PB 极值
     "fund_flow_divergence": 25,  # 资金流向与价格反向
     "fundamental_jump": 25,      # 基本面字段跳变
+    "ex_rights_mismatch": 25,    # 除权跳空未匹配
+    "suspended_with_trades": 30, # 停牌但有成交
+    "valuation_outdated": 15,    # 估值快照过期
+    "valuation_missing": 15,     # 无估值快照
+    "newly_listed": 10,          # 新股上市60天内
 }
 
 
@@ -55,7 +60,7 @@ class AnomalyDetector:
             date.fromisoformat(self.trade_date) - timedelta(days=lookback * 2)
         ).isoformat()
         self.industries: dict[int, str] = {}
-        self._quotes: dict[int, list[tuple[str, float, float, float, float, float, float]]] = {}
+        self._quotes: dict[int, list[tuple[str, float, float, float, float, float, float, int]]] = {}
         self._metrics: dict[tuple[int, str], dict[str, Any]] = {}
         self._valuation: dict[tuple[int, str], dict[str, Any]] = {}
         self._fund_flow: dict[tuple[int, str], float] = {}
@@ -89,7 +94,7 @@ class AnomalyDetector:
     def _load_quotes(self) -> None:
         by_sid: dict[int, list] = defaultdict(list)
         for row in self.conn.execute(
-            """SELECT stock_id, trade_date, close, volume, high, low, turnover, amount
+            """SELECT stock_id, trade_date, close, volume, high, low, turnover, amount, is_suspended
                FROM stock_daily_quotes
                WHERE trade_date >= ? AND trade_date <= ? AND close IS NOT NULL
                ORDER BY stock_id, trade_date""",
@@ -104,6 +109,7 @@ class AnomalyDetector:
                 float(row[5] or 0),  # low
                 float(row[6] or 0),  # turnover
                 float(row[7] or 0),  # amount
+                int(row[8] or 0),  # is_suspended
             ))
         self._quotes = dict(by_sid)
 
@@ -166,10 +172,10 @@ class AnomalyDetector:
 
     # ── 工具函数 ───────────────────────────────────────────
 
-    def _hist(self, stock_id: int) -> list[tuple[str, float, float, float, float, float, float]]:
+    def _hist(self, stock_id: int) -> list[tuple[str, float, float, float, float, float, float, int]]:
         return self._quotes.get(stock_id, [])
 
-    def _today(self, stock_id: int) -> Optional[tuple[str, float, float, float, float, float, float]]:
+    def _today(self, stock_id: int) -> Optional[tuple[str, float, float, float, float, float, float, int]]:
         hist = self._hist(stock_id)
         if not hist:
             return None
@@ -377,6 +383,77 @@ class AnomalyDetector:
                     score += self._add_flag(flags, "fundamental_jump")
         return score
 
+    def _check_ex_rights_mismatch(self, stock_id: int, flags: list[str]) -> int:
+        """收盘价跳空 >= 10% 但前后 3 天无除权除息记录。"""
+        hist = self._hist(stock_id)
+        if len(hist) < 2:
+            return 0
+        today = hist[-1]
+        yesterday = hist[-2]
+        if yesterday[1] <= 0:
+            return 0
+        ret = today[1] / yesterday[1] - 1
+        if abs(ret) < 0.15:
+            return 0
+
+        today_dt = date.fromisoformat(today[0])
+        for offset in range(-3, 4):
+            d = (today_dt + timedelta(days=offset)).isoformat()
+            row = self.conn.execute(
+                "SELECT 1 FROM stock_ex_rights WHERE stock_id=? AND ex_date=?",
+                (stock_id, d),
+            ).fetchone()
+            if row:
+                return 0
+        return self._add_flag(flags, "ex_rights_mismatch")
+
+    def _check_suspended_with_trades(self, stock_id: int, flags: list[str]) -> int:
+        """标记为停牌但当日有成交量。"""
+        today = self._today(stock_id)
+        if today is None:
+            return 0
+        # tuple 第 8 位是 is_suspended，第 3 位是 volume
+        if today[7] == 1 and today[2] > 0:
+            return self._add_flag(flags, "suspended_with_trades")
+        return 0
+
+    def _check_valuation_status(self, stock_id: int, flags: list[str]) -> int:
+        """估值快照缺失或超过 30 天未更新。"""
+        row = self.conn.execute(
+            "SELECT MAX(as_of_date) FROM valuation_snapshots WHERE stock_id=?",
+            (stock_id,),
+        ).fetchone()
+        if not row or not row[0]:
+            return self._add_flag(flags, "valuation_missing")
+        last_date = date.fromisoformat(row[0])
+        today = date.fromisoformat(self.trade_date)
+        if (today - last_date).days > 30:
+            return self._add_flag(flags, "valuation_outdated")
+        return 0
+
+    def _check_newly_listed(self, stock_id: int, flags: list[str]) -> int:
+        """上市 60 天内。"""
+        row = self.conn.execute(
+            "SELECT list_date FROM stock_lifecycle WHERE stock_id=?",
+            (stock_id,),
+        ).fetchone()
+        if not row or not row[0]:
+            row = self.conn.execute(
+                "SELECT list_date FROM stocks WHERE id=?",
+                (stock_id,),
+            ).fetchone()
+        if not row or not row[0]:
+            return 0
+        raw = str(row[0]).strip()
+        if len(raw) == 8 and raw.isdigit():
+            list_date = date(int(raw[:4]), int(raw[4:6]), int(raw[6:]))
+        else:
+            list_date = date.fromisoformat(raw)
+        today = date.fromisoformat(self.trade_date)
+        if (today - list_date).days <= 60:
+            return self._add_flag(flags, "newly_listed")
+        return 0
+
     # ── 主入口 ───────────────────────────────────────────
 
     def detect(self) -> list[dict]:
@@ -394,6 +471,10 @@ class AnomalyDetector:
             score += self._check_pb_anomaly(stock_id, flags)
             score += self._check_fund_flow_divergence(stock_id, flags)
             score += self._check_fundamental_jump(stock_id, flags)
+            score += self._check_ex_rights_mismatch(stock_id, flags)
+            score += self._check_suspended_with_trades(stock_id, flags)
+            score += self._check_valuation_status(stock_id, flags)
+            score += self._check_newly_listed(stock_id, flags)
 
             if score > 0:
                 results.append({
@@ -428,9 +509,15 @@ def detect_and_write(
     trade_date: Optional[str] = None,
     lookback: int = 60,
 ) -> dict:
-    """一站式：检测 + 写入 + 返回摘要。"""
+    """一站式：检测 + 写入 + 返回摘要。
+
+    幂等：每次会先清空该交易日的历史告警，再重新写入。
+    """
     detector = AnomalyDetector(conn, trade_date=trade_date, lookback=lookback)
     alerts = detector.detect()
+    # 清空该交易日旧数据，避免规则/阈值调整后残留旧告警
+    conn.execute("DELETE FROM data_quality_alerts WHERE trade_date=?", (detector.trade_date,))
+    conn.commit()
     written = write_alerts(conn, alerts)
     summary = {
         "trade_date": detector.trade_date,
