@@ -182,12 +182,40 @@ export function getV5RecalcTimestamp(): number {
   }
 }
 
-function fetchV5ScoresBatch(market?: string, limit?: number) {
+export type V5MarketScope =
+  | "ALL"
+  | "A"
+  | "SH"
+  | "SZ"
+  | "STAR"
+  | "CHINEXT"
+  | "MAIN_SH"
+  | "MAIN_SZ"
+  | "SME"
+  | "BJ";
+
+export const V5_MARKET_SCOPES: { id: V5MarketScope; label: string }[] = [
+  { id: "A", label: "全部 A 股" },
+  { id: "SH", label: "沪市" },
+  { id: "SZ", label: "深市" },
+  { id: "STAR", label: "科创板" },
+  { id: "CHINEXT", label: "创业板" },
+  { id: "MAIN_SH", label: "沪市主板" },
+  { id: "MAIN_SZ", label: "深市主板" },
+  { id: "SME", label: "中小板" },
+  { id: "BJ", label: "北交所" },
+  { id: "ALL", label: "全部（含非 A 股）" },
+];
+
+function fetchV5ScoresBatch(scope?: string, limit?: number) {
   const q = new URLSearchParams();
   q.set("_", String(Date.now()));
-  if (market && market !== "ALL") q.set("market", market);
+  if (scope && scope !== "ALL") q.set("scope", scope);
+  else if (scope === "ALL") q.set("scope", "ALL");
   if (limit) q.set("limit", String(limit));
   return request<{
+    scope?: string;
+    scope_label?: string;
     calc_date?: string;
     scores: V5ScoreRow[];
     count: number;
@@ -195,11 +223,13 @@ function fetchV5ScoresBatch(market?: string, limit?: number) {
 }
 
 /** 股票列表 + V5 分：单次合并接口，避免两次大请求 */
-export async function loadStocksWithV5(market = "ALL") {
+export async function loadStocksWithV5(scope: V5MarketScope | string = "A") {
   const q = new URLSearchParams();
   q.set("_", String(Date.now()));
-  if (market && market !== "ALL") q.set("market", market);
+  if (scope) q.set("scope", scope);
   const data = await request<{
+    scope?: string;
+    scope_label?: string;
     calc_date?: string;
     rows: (Stock & {
       composite_v5: number | null;
@@ -1167,8 +1197,8 @@ export const api = {
   getV5Scores: (stockId: number) =>
     request<{ stock_id: number; v5: Record<string, unknown> }>(`/v5/scores/${stockId}`),
 
-  getV5ScoresBatch: (opts?: { limit?: number; market?: string }) =>
-    fetchV5ScoresBatch(opts?.market, opts?.limit),
+  getV5ScoresBatch: (opts?: { limit?: number; scope?: string; market?: string }) =>
+    fetchV5ScoresBatch(opts?.scope ?? opts?.market, opts?.limit),
 
   computeV5Scores: (body?: { stock_ids?: number[] }) =>
     request<Record<string, unknown>>("/v5/compute-scores", {

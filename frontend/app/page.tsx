@@ -11,7 +11,7 @@ import { ThsHotspotsCard } from "@/components/ThsHotspotsCard";
 import { MacroIndicatorsPanel } from "@/components/MacroIndicatorsPanel";
 import { SectorRotationCard } from "@/components/SectorRotationCard";
 import { MarketOpsButtons } from "@/components/MarketOpsButtons";
-import { api, DashboardOverview, clearCache, pollFetchUntilDone, V5_RECALC_EVENT, getV5RecalcTimestamp, postSparkline, SparklineSeries } from "@/lib/api"
+import { api, DashboardOverview, clearCache, pollFetchUntilDone, V5_RECALC_EVENT, getV5RecalcTimestamp, postSparkline, SparklineSeries, V5MarketScope, V5_MARKET_SCOPES } from "@/lib/api"
 import { ScoreSparkline } from "@/components/ScoreSparkline";
 import { DataHealthCard } from "@/components/DataHealthCard";
 import { ScoreAlertCard } from "@/components/ScoreAlertCard";
@@ -37,6 +37,8 @@ export default function DashboardPage() {
   >([]);
   const [v5Rank, setV5Rank] = useState<import("@/lib/api").V5ScoreRow[]>([]);
   const [v5CalcDate, setV5CalcDate] = useState<string | null>(null);
+  const [v5Scope, setV5Scope] = useState<V5MarketScope>("A");
+  const [v5ScopeLabel, setV5ScopeLabel] = useState("全部 A 股");
   const [sparklines, setSparklines] = useState<SparklineSeries>({});
   const lastV5TsRef = useRef(0);
   const [rankSortKey, setRankSortKey] = useState("score");
@@ -81,7 +83,7 @@ export default function DashboardPage() {
       const [data, mlRes, v5Batch, qRes, mRes, revRes, hotRes, thsRes] = await Promise.all([
         api.dashboardOverview(),
         api.mlTop(8),
-        api.getV5ScoresBatch({ market: "A" }),
+        api.getV5ScoresBatch({ scope: v5Scope }),
         fetch("/api/fusion/quality").then(r => r.json()),
         fetch("/api/macro/score").then(r => r.json()),
         fetch("/api/review/latest").then(r => r.json()),
@@ -98,6 +100,7 @@ export default function DashboardPage() {
       const scores = v5Batch.scores || [];
       setV5Rank(scores);
       setV5CalcDate(v5Batch.calc_date ?? null);
+      setV5ScopeLabel(v5Batch.scope_label ?? V5_MARKET_SCOPES.find((s) => s.id === v5Scope)?.label ?? v5Scope);
       lastV5TsRef.current = getV5RecalcTimestamp();
       // U1-3: 1次 bulk XHR 拉取 sparkline（禁止 N+1）
       if (scores.length > 0) {
@@ -109,7 +112,7 @@ export default function DashboardPage() {
       console.error(e);
     }
     setLoading(false);
-  }, []);
+  }, [v5Scope]);
 
   useEffect(() => {
     loadData();
@@ -249,7 +252,7 @@ export default function DashboardPage() {
         <StatTile
           label="V5 均分"
           value={avgV5 != null ? avgV5.toFixed(1) : "—"}
-          sub={`${v5Rank.length} 只股票`}
+          sub={`${v5Rank.length} 只 · ${v5ScopeLabel}`}
           tone="accent"
         />
         <StatTile
@@ -444,7 +447,7 @@ export default function DashboardPage() {
       {/* 评分分布 + PDF导出 */}
       <div className="grid grid-cols-2 gap-4">
         <Card>
-          <CardHeader><CardTitle className="text-base">V5 评分分布 ({v5Rank.length}只)</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">V5 评分分布 ({v5Rank.length}只 · {v5ScopeLabel})</CardTitle></CardHeader>
           <CardContent>
             <ScoreDistribution scores={sortedRank} />
           </CardContent>
@@ -467,12 +470,27 @@ export default function DashboardPage() {
       {/* V5 评分排名 */}
       {v5Rank.length > 0 && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-sm flex items-center gap-1.5">
+          <CardHeader className="flex flex-row items-center justify-between gap-3 flex-wrap">
+            <CardTitle className="text-sm flex items-center gap-1.5 flex-wrap">
               <Trophy className="h-4 w-4 text-muted-foreground" />
-              V5 评分排名 · A股 ({v5Rank.length}只)
+              V5 评分排名 · {v5ScopeLabel} ({v5Rank.length}只)
               {v5CalcDate ? <span className="text-[11px] font-normal font-mono text-muted-foreground ml-2">评分日 {v5CalcDate}</span> : null}
             </CardTitle>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground whitespace-nowrap" htmlFor="v5-scope">
+                范围
+              </label>
+              <select
+                id="v5-scope"
+                value={v5Scope}
+                onChange={(e) => setV5Scope(e.target.value as V5MarketScope)}
+                className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+              >
+                {V5_MARKET_SCOPES.map((opt) => (
+                  <option key={opt.id} value={opt.id}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
             <button
               onClick={() => exportCsv(
                 `v5_ranking_${v5CalcDate ?? "latest"}.csv`,

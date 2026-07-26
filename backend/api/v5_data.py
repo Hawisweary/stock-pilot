@@ -242,26 +242,39 @@ async def v5_heatmap():
     return {"dims": labels, "matrix": matrix, "count": len(matrix)}
 
 
+@router.get("/market-scopes")
+async def v5_market_scopes():
+    """V5 批量查询可用的市场 / 板块 scope 列表。"""
+    from services.market_filter import MARKET_SCOPES
+
+    return {
+        "scopes": [{"id": k, "label": v} for k, v in MARKET_SCOPES.items()],
+    }
+
+
 @router.get("/scores/batch")
 async def v5_scores_batch(
     limit: int | None = Query(None, ge=1, le=10000),
-    market: str | None = Query(None, description="SH/SZ/A/HK/US/ALL，ALL 或不传返回全部"),
+    scope: str | None = Query(None, description="ALL/A/SH/SZ/STAR/CHINEXT/MAIN_SH/MAIN_SZ/SME/BJ"),
+    market: str | None = Query(None, description="兼容旧参数，等同 scope"),
 ):
     """全市场 V5 分数批量查询（与股票列表同一 JOIN 规则）。"""
     from database import get as get_db_conn
+    from services.market_filter import normalize_scope, scope_label, scope_sql
 
     conn = get_db_conn()
-    # v3.0: 使用 v_stock_scores 视图，省去手动 latest-JOIN
-    sql = """
+    resolved = normalize_scope(scope, market=market)
+    scope_clause, scope_params = scope_sql(
+        resolved, market_col="market", code_col="code"
+    )
+    sql = f"""
         SELECT stock_id, code, name, industry_sw, market,
                calc_date, score AS composite_v5, veto_status
         FROM v_stock_scores
         WHERE score IS NOT NULL
+        {scope_clause}
     """
-    params: list = []
-    if market and market.upper().strip() not in ("ALL", ""):
-        sql += " AND market=?"
-        params.append(market.upper().strip())
+    params: list = list(scope_params)
     sql += " ORDER BY score DESC"
     if limit:
         sql += " LIMIT ?"
@@ -269,6 +282,8 @@ async def v5_scores_batch(
     rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
     calc_dates = [r.get("calc_date") for r in rows if r.get("calc_date")]
     return {
+        "scope": resolved,
+        "scope_label": scope_label(resolved),
         "calc_date": max(calc_dates) if calc_dates else None,
         "scores": rows,
         "count": len(rows),
@@ -277,15 +292,19 @@ async def v5_scores_batch(
 
 @router.get("/stocks-with-scores")
 async def stocks_with_scores(
-    market: str | None = Query(None, description="A/SH/SZ/HK/US/ALL，不传返回全部活跃股票"),
+    scope: str | None = Query(None, description="ALL/A/SH/SZ/STAR/CHINEXT/MAIN_SH/MAIN_SZ/SME/BJ"),
+    market: str | None = Query(None, description="兼容旧参数，等同 scope"),
 ):
     """股票列表 + V5 分数合并接口（单次查询，替代前端两次并发请求）。"""
     from database import get as get_db_conn
+    from services.market_filter import normalize_scope, scope_label, scope_sql
 
     conn = get_db_conn()
-    # 直接走 comprehensive_scores_latest 影子表点查，避免 v_stock_scores 视图内部
-    # 已 JOIN 过 stocks 之后，这里再对 stocks 做一次冗余 self-join。
-    sql = """
+    resolved = normalize_scope(scope, market=market)
+    scope_clause, scope_params = scope_sql(
+        resolved, market_col="s.market", code_col="s.code"
+    )
+    sql = f"""
         SELECT
             s.id, s.code, s.name, s.market, s.sector, s.industry,
             s.industry_sw, s.industry_sw2, s.industry_sw3, s.is_active, s.list_date,
@@ -297,11 +316,9 @@ async def stocks_with_scores(
         LEFT JOIN comprehensive_scores_latest l ON s.id = l.stock_id
         LEFT JOIN comprehensive_scores cs ON cs.id = l.cs_id
         WHERE s.is_active = 1
+        {scope_clause}
     """
-    params: list = []
-    if market and market.upper().strip() not in ("ALL", ""):
-        sql += " AND s.market=?"
-        params.append(market.upper().strip())
+    params: list = list(scope_params)
     sql += " ORDER BY cs.composite_v5 DESC NULLS LAST"
     rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
 
@@ -315,6 +332,8 @@ async def stocks_with_scores(
 
     calc_dates = [r.get("calc_date") for r in rows if r.get("calc_date")]
     return {
+        "scope": resolved,
+        "scope_label": scope_label(resolved),
         "calc_date": max(calc_dates) if calc_dates else None,
         "rows": rows,
         "count": len(rows),
