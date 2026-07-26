@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { LayoutDashboard, BarChart3, Database, TrendingUp, Moon, Sun, Activity, Grid3X3, FlaskConical, Briefcase, Menu, X, Filter, CalendarDays } from "lucide-react";
+import { LayoutDashboard, BarChart3, Database, TrendingUp, Moon, Sun, Activity, Grid3X3, FlaskConical, Briefcase, Menu, X, Filter, CalendarDays, ShieldCheck } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { useEffect, useState } from "react";
@@ -34,6 +34,7 @@ const ALL_NAV: NavItem[] = [
   { href: "/factors", label: "因子实验室", icon: FlaskConical, beta: true, flag: "factor_lab" },
   // /ic 重定向至 /factors?tab=ic
   { href: "/data", label: "数据管理", icon: Database },
+  { href: "/data-quality", label: "质量看板", icon: ShieldCheck },
 ];
 
 const DEFAULT_FLAGS: FeatureFlags = {

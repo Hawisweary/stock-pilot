@@ -1182,6 +1182,105 @@ export const api = {
 
   getV5IcReport: (dimension = "composite_v5") =>
     request<Record<string, unknown>>(`/v5/ic-report?dimension=${encodeURIComponent(dimension)}`),
+
+  // 数据质量 / 市场状态 / 波动率预测
+  getDataQualitySummary: (tradeDate?: string) =>
+    request<{
+      trade_date: string;
+      total_alerts: number;
+      by_severity: Record<string, number>;
+      top_alerts: Array<{ stock_id: number; anomaly_score: number; severity: string; flags: string[] }>;
+    }>(
+      tradeDate
+        ? `/v5/data-quality/summary?trade_date=${encodeURIComponent(tradeDate)}`
+        : "/v5/data-quality/summary",
+    ),
+
+  getDataQualityStock: (stockId: number, limit?: number) =>
+    request<{
+      stock_id: number;
+      alerts: Array<{
+        trade_date: string;
+        anomaly_score: number;
+        flags: string[];
+        severity: string;
+        created_at?: string;
+      }>;
+    }>(`/v5/data-quality/stock/${stockId}${limit ? `?limit=${limit}` : ""}`),
+
+  detectDataQuality: (tradeDate?: string) =>
+    request<{
+      trade_date: string;
+      total_alerts: number;
+      critical: number;
+      warning: number;
+      info: number;
+    }>(
+      tradeDate
+        ? `/v5/data-quality/detect?trade_date=${encodeURIComponent(tradeDate)}`
+        : "/v5/data-quality/detect",
+      { method: "POST" },
+    ),
+
+  getMarketRegime: (tradeDate?: string) =>
+    request<Record<string, unknown>>(
+      tradeDate
+        ? `/v5/market-regime?trade_date=${encodeURIComponent(tradeDate)}`
+        : "/v5/market-regime",
+    ),
+
+  syncMarketRegime: (tradeDate?: string) =>
+    request<Record<string, unknown>>(
+      tradeDate
+        ? `/v5/market-regime/sync?trade_date=${encodeURIComponent(tradeDate)}`
+        : "/v5/market-regime/sync",
+      { method: "POST" },
+    ),
+
+  getVolatilityForecast: (tradeDate?: string) =>
+    request<{
+      trade_date: string;
+      total_records: number;
+      avg_realized_vol_20: number;
+      avg_forecast_vol_20: number;
+      avg_turnover_20: number;
+      avg_amount_20: number;
+      avg_amihud_illiq_20: number;
+      top_volatility: Array<{
+        stock_id: number;
+        realized_vol_20: number;
+        forecast_vol_20: number;
+        avg_turnover_20: number;
+      }>;
+    }>(
+      tradeDate
+        ? `/v5/volatility-forecast?trade_date=${encodeURIComponent(tradeDate)}`
+        : "/v5/volatility-forecast",
+    ),
+
+  getVolatilityForecastStock: (stockId: number, limit?: number) =>
+    request<{
+      stock_id: number;
+      forecasts: Array<{
+        trade_date: string;
+        realized_vol_20: number;
+        realized_vol_60: number;
+        avg_turnover_20: number;
+        avg_amount_20: number;
+        amihud_illiq_20: number;
+        forecast_vol_20: number;
+        forecast_horizon: number;
+        forecast_method: string;
+      }>;
+    }>(`/v5/volatility-forecast/${stockId}${limit ? `?limit=${limit}` : ""}`),
+
+  syncVolatilityForecast: (tradeDate?: string) =>
+    request<Record<string, unknown>>(
+      tradeDate
+        ? `/v5/volatility-forecast/sync?trade_date=${encodeURIComponent(tradeDate)}`
+        : "/v5/volatility-forecast/sync",
+      { method: "POST" },
+    ),
 };
 
 export interface FetchLogStep {
