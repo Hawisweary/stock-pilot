@@ -91,10 +91,11 @@ def _clamp_tier(t: int) -> int:
     return max(-2, min(2, int(t)))
 
 
-def _weighted_base(tiers: dict[str, int | None]) -> float:
+def _weighted_base(tiers: dict[str, int | None], weights: dict[str, float] | None = None) -> float:
+    weights = weights or V5_WEIGHTS
     total = 0.0
     w_sum = 0.0
-    for dim, w in V5_WEIGHTS.items():
+    for dim, w in weights.items():
         tier = tiers.get(dim)
         if tier is None:
             continue
@@ -123,18 +124,47 @@ def _shortboard_penalty(tiers: dict[str, int | None]) -> float:
     return min(SHORTBOARD_PENALTY_CAP, penalty)
 
 
-def _score_metadata(tiers: dict[str, int | None]) -> dict[str, Any]:
-    missing = [d for d in V5_WEIGHTS if tiers.get(d) is None]
-    available = [d for d in V5_WEIGHTS if tiers.get(d) is not None]
-    w_sum = sum(V5_WEIGHTS[d] for d in available)
+def _score_metadata(tiers: dict[str, int | None], weights: dict[str, float] | None = None) -> dict[str, Any]:
+    weights = weights or V5_WEIGHTS
+    missing = [d for d in weights if tiers.get(d) is None]
+    available = [d for d in weights if tiers.get(d) is not None]
+    w_sum = sum(weights[d] for d in available)
     effective = {
-        d: round(V5_WEIGHTS[d] / w_sum, 4) if w_sum > 0 else 0.0 for d in available
+        d: round(weights[d] / w_sum, 4) if w_sum > 0 else 0.0 for d in available
     }
     return {
         "missing_dims": missing,
-        "dims_available": f"{len(available)}/{len(V5_WEIGHTS)}",
+        "dims_available": f"{len(available)}/{len(weights)}",
         "effective_weights": effective,
     }
+
+
+def _regime_weights(
+    conn: sqlite3.Connection,
+    calc_date: str | None = None,
+) -> dict[str, float]:
+    """根据市场状态返回动态权重；无数据或表不存在时返回基线权重。"""
+    as_of = calc_date or latest_trading_date()
+    try:
+        row = conn.execute(
+            """SELECT regime FROM market_regime_daily
+               WHERE trade_date<=? ORDER BY trade_date DESC LIMIT 1""",
+            (as_of,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return dict(V5_WEIGHTS)
+    if not row:
+        return dict(V5_WEIGHTS)
+    regime = str(row[0])
+    deltas = config.V5_REGIME_WEIGHT_DELTAS.get(regime, {})
+    if not deltas:
+        return dict(V5_WEIGHTS)
+    weights = {d: V5_WEIGHTS[d] + deltas.get(d, 0.0) for d in V5_WEIGHTS}
+    # 归一化到 1.0
+    total = sum(weights.values())
+    if total > 0 and abs(total - 1.0) > 1e-6:
+        weights = {d: w / total for d, w in weights.items()}
+    return weights
 
 
 def _capital_tier_from_flow(main_net_5d: float | None) -> int:
@@ -797,7 +827,8 @@ def compute_stock_v5_tiers(
             "mood": mood_tier,
         }
 
-        base = _weighted_base(tiers)
+        weights = _regime_weights(conn, calc_date)
+        base = _weighted_base(tiers, weights)
         penalty = _shortboard_penalty(tiers)
         raw_composite = max(0.0, base - penalty)
 
@@ -820,7 +851,16 @@ def compute_stock_v5_tiers(
             dim: round(tier_to_pct(tiers[dim]), 1) if tiers[dim] is not None else None
             for dim in tiers
         }
-        meta = _score_metadata(tiers)
+        meta = _score_metadata(tiers, weights)
+        try:
+            regime = conn.execute(
+                """SELECT regime FROM market_regime_daily
+                   WHERE trade_date<=? ORDER BY trade_date DESC LIMIT 1""",
+                (calc_date or latest_trading_date(),),
+            ).fetchone()
+            market_regime = regime[0] if regime else "oscillation"
+        except sqlite3.OperationalError:
+            market_regime = "oscillation"
 
         as_of = latest_trading_date()
         return {
@@ -845,6 +885,7 @@ def compute_stock_v5_tiers(
             "missing_dims": meta["missing_dims"],
             "dims_available": meta["dims_available"],
             "effective_weights": meta["effective_weights"],
+            "market_regime": market_regime,
             "market_beta": round(stock_beta, 3),
             "capital_breakdown": cap_v5,
             "discount_flags": discount_flags,
@@ -867,6 +908,7 @@ def persist_v5_score(
         "missing_dims": result.get("missing_dims"),
         "dims_available": result.get("dims_available"),
         "effective_weights": result.get("effective_weights"),
+        "market_regime": result.get("market_regime"),
         "market_beta": result.get("market_beta"),
         "capital_breakdown": result.get("capital_breakdown"),
     }

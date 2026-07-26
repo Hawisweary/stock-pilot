@@ -83,6 +83,12 @@ def scorer_db(tmp_path, monkeypatch):
             created_at TEXT DEFAULT (datetime('now')),
             UNIQUE(stock_id, trade_date)
         );
+        CREATE TABLE market_regime_daily (
+            trade_date TEXT PRIMARY KEY, index_code TEXT, regime TEXT,
+            rsi_14 REAL, volatility_20 REAL, adx REAL,
+            return_20d REAL, return_60d REAL, price_vs_ma20 REAL, price_vs_ma60 REAL,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
         INSERT INTO stock_daily_quotes VALUES (1, '2026-06-04', 10.0);
         INSERT INTO stocks VALUES (1, '300450', '先导智能', 1, '电力设备', '电池');
         INSERT INTO stock_v5_metrics VALUES (1, '2026-06-04', 2, -2, 5.0);

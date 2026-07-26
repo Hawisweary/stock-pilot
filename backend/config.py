@@ -62,6 +62,16 @@ V5_DATA_QUALITY_DISCOUNT_MULT = float(os.getenv("V5_DATA_QUALITY_DISCOUNT_MULT",
 # DQ-1：数据质量异常直接排除的阈值（anomaly_score>=80）
 V5_DATA_QUALITY_EXCLUDE_THRESHOLD = float(os.getenv("V5_DATA_QUALITY_EXCLUDE_THRESHOLD", "80.0"))
 
+# MR-1：市场状态分类对 V5 维度的动态调整（相对基线权重的增量，会自动归一化）
+V5_REGIME_WEIGHT_DELTAS: dict[str, dict[str, float]] = {
+    "strong_trend_up": {"technical": 0.05, "capital": 0.03, "valuation": -0.08},
+    "weak_trend_up": {"technical": 0.03, "capital": 0.02, "valuation": -0.05},
+    "strong_trend_down": {"quality": 0.05, "valuation": 0.05, "technical": -0.05, "capital": -0.05},
+    "weak_trend_down": {"quality": 0.03, "valuation": 0.03, "technical": -0.03, "capital": -0.03},
+    "high_volatility": {"quality": 0.05, "valuation": 0.03, "technical": -0.05, "capital": -0.03},
+    "oscillation": {},
+}
+
 # M1：动量 profile 的 quality_minus2 折扣（比 value 宽松，但仍保留惩罚）
 V5_MOMENTUM_QUALITY_DISCOUNT_MULT = float(os.getenv("V5_MOMENTUM_QUALITY_DISCOUNT_MULT", "0.85"))
 

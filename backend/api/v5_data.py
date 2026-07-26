@@ -479,3 +479,28 @@ async def data_quality_detect(trade_date: str | None = None):
 
     conn = get_db_conn()
     return detect_and_write(conn, trade_date=trade_date)
+
+
+@router.get("/market-regime")
+async def market_regime(trade_date: str | None = None):
+    """获取市场状态分类（趋势/震荡/高波动）。"""
+    from database import get as get_db_conn
+    from services.market_regime import get_regime_for_date, sync_regime
+
+    conn = get_db_conn()
+    if trade_date:
+        row = get_regime_for_date(conn, trade_date)
+        if row.get("regime"):
+            return row
+    # 无数据时自动检测并返回
+    return sync_regime(conn, trade_date=trade_date)
+
+
+@router.post("/market-regime/sync")
+async def market_regime_sync(trade_date: str | None = None):
+    """手动触发市场状态分类检测。"""
+    from database import get as get_db_conn
+    from services.market_regime import sync_regime
+
+    conn = get_db_conn()
+    return sync_regime(conn, trade_date=trade_date)
