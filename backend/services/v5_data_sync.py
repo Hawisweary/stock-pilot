@@ -17,9 +17,11 @@ from services.macro_sync import sync_macro_indicators
 from services.mood_scorer import compute_all_mood_v5
 from services.news_fetcher import sync_all_news
 from services.policy_event_sync import sync_policy_v5
+from services.ml_impute import impute_v5_tables
 from services.quality_metrics_calc import compute_all_v5_metrics
 from services.risk_scanner import scan_risk_flags
 from services.sector_fund_flow_sync import sync_sector_fund_flow
+from services.tushare_event_sync import sync_tushare_event_data
 from services.v5_scorer import compute_all_v5_scores
 
 # 预设同步模式（API mode= / 调度器）
@@ -34,6 +36,7 @@ V5_SYNC_MODE_PRESETS: dict[str, dict[str, Any]] = {
         "reclassify_events": False,
         "use_llm_events": True,
         "llm_only_missing_news": True,
+        "skip_tushare_events": True,
     },
     "nightly": {
         "skip_macro": True,
@@ -44,10 +47,11 @@ V5_SYNC_MODE_PRESETS: dict[str, dict[str, Any]] = {
         "skip_industry_l2": True,
         "skip_metrics": True,
         "skip_eps_revision": True,
-        "skip_risk": True,
-        "skip_policy": True,
+        "skip_risk": False,
+        "skip_policy": False,
         "skip_mood": True,
         "skip_v5_scores": True,
+        "skip_tushare_events": True,
         "reclassify_events": True,
         "use_llm_events": True,
         "llm_only_missing_news": False,
@@ -61,13 +65,16 @@ V5_SYNC_MODE_PRESETS: dict[str, dict[str, Any]] = {
         "skip_industry_l2": True,
         "skip_metrics": False,
         "skip_eps_revision": False,
-        "skip_risk": True,
-        "skip_policy": True,
-        "skip_mood": True,
+        "skip_risk": False,
+        "skip_policy": False,
+        "skip_mood": False,
         "skip_v5_scores": False,
         "skip_events": True,
         "reclassify_events": False,
         "use_llm_events": False,
+        "skip_tushare_events": False,
+        "tushare_event_days": 30,
+        "skip_per_stock": False,
     },
 }
 
@@ -143,6 +150,8 @@ def sync_v5_data_sources(
     skip_policy: bool = False,
     skip_mood: bool = False,
     skip_v5_scores: bool = False,
+    skip_tushare_events: bool = False,
+    tushare_event_days: int = 10,
     announcement_limit: int = 30,
     news_limit: int = 15,
 ) -> dict:
@@ -167,6 +176,9 @@ def sync_v5_data_sources(
         "skip_policy": skip_policy,
         "skip_mood": skip_mood,
         "skip_v5_scores": skip_v5_scores,
+        "skip_tushare_events": skip_tushare_events,
+        "tushare_event_days": tushare_event_days,
+        "skip_per_stock": skip_per_stock,
         "announcement_limit": announcement_limit,
         "news_limit": news_limit,
     }
@@ -222,6 +234,13 @@ def sync_v5_data_sources(
         except Exception as e:
             result["steps"]["v5_metrics"] = {"error": str(e)}
 
+    try:
+        with sqlite3.connect(config.DB_PATH, timeout=120) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")
+            result["steps"]["impute_v5"] = impute_v5_tables(conn)
+    except Exception as e:
+        result["steps"]["impute_v5"] = {"error": str(e)}
+
     if not opts["skip_eps_revision"]:
         try:
             eps = sync_stock_eps_forecast(opts["stock_ids"])
@@ -275,6 +294,16 @@ def sync_v5_data_sources(
             result["steps"]["v5_scores"] = compute_all_v5_scores(opts["stock_ids"])
         except Exception as e:
             result["steps"]["v5_scores"] = {"error": str(e)}
+
+    if not opts["skip_tushare_events"]:
+        try:
+            result["steps"]["tushare_events"] = sync_tushare_event_data(
+                stock_ids=opts["stock_ids"],
+                days=opts["tushare_event_days"],
+                skip_per_stock=opts.get("skip_per_stock", True),
+            )
+        except Exception as e:
+            result["steps"]["tushare_events"] = {"error": str(e)}
 
     result["news_event_coverage"] = _news_event_coverage(opts["stock_ids"])
     result["ok"] = all(

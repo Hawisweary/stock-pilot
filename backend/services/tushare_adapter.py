@@ -34,6 +34,33 @@ def _throttle() -> None:
         _last_call_ts = time.perf_counter()
 
 
+def _is_rate_limit_error(e: Exception) -> bool:
+    """判断异常是否为 Tushare 频次限制。"""
+    msg = str(e).lower()
+    return any(k in msg for k in (
+        "频率", "频次", "rate limit", "too fast", "throttle",
+        "limit reached", "access frequency", "访问过快",
+    ))
+
+
+def _call_with_retry(callable, max_retries: int = 10) -> Any:
+    """调用 Tushare API，遇到频次限制时指数退避后重试，最多等 60s/次。"""
+    last_error: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            _throttle()
+            return callable()
+        except Exception as e:
+            last_error = e
+            if _is_rate_limit_error(e) and attempt < max_retries - 1:
+                delay = min(5 * (2 ** attempt), 60)
+                print(f"[Tushare] 频次限制，等待 {delay}s 后重试 ({attempt + 1}/{max_retries})...")
+                time.sleep(delay)
+                continue
+            raise
+    raise last_error or RuntimeError("Tushare API 重试次数耗尽")
+
+
 def _pro():
     global _pro_client
     if _pro_client is None:
@@ -526,16 +553,20 @@ def fetch_market_fund_flow_l2_detail(trade_date: str) -> dict[str, dict[str, Any
         return {}
     result: dict[str, dict[str, Any]] = {}
     for _, r in df.iterrows():
+        def _amount(k: str) -> float | None:
+            v = _f(r.get(k))
+            return v * 10000 if v is not None else None
+
         result[r["ts_code"]] = {
-            "buy_sm_amount": _f(r.get("buy_sm_amount")) * 10000 if r.get("buy_sm_amount") is not None else None,
-            "sell_sm_amount": _f(r.get("sell_sm_amount")) * 10000 if r.get("sell_sm_amount") is not None else None,
-            "buy_md_amount": _f(r.get("buy_md_amount")) * 10000 if r.get("buy_md_amount") is not None else None,
-            "sell_md_amount": _f(r.get("sell_md_amount")) * 10000 if r.get("sell_md_amount") is not None else None,
-            "buy_lg_amount": _f(r.get("buy_lg_amount")) * 10000 if r.get("buy_lg_amount") is not None else None,
-            "sell_lg_amount": _f(r.get("sell_lg_amount")) * 10000 if r.get("sell_lg_amount") is not None else None,
-            "buy_elg_amount": _f(r.get("buy_elg_amount")) * 10000 if r.get("buy_elg_amount") is not None else None,
-            "sell_elg_amount": _f(r.get("sell_elg_amount")) * 10000 if r.get("sell_elg_amount") is not None else None,
-            "net_mf_amount": _f(r.get("net_mf_amount")) * 10000 if r.get("net_mf_amount") is not None else None,
+            "buy_sm_amount": _amount("buy_sm_amount"),
+            "sell_sm_amount": _amount("sell_sm_amount"),
+            "buy_md_amount": _amount("buy_md_amount"),
+            "sell_md_amount": _amount("sell_md_amount"),
+            "buy_lg_amount": _amount("buy_lg_amount"),
+            "sell_lg_amount": _amount("sell_lg_amount"),
+            "buy_elg_amount": _amount("buy_elg_amount"),
+            "sell_elg_amount": _amount("sell_elg_amount"),
+            "net_mf_amount": _amount("net_mf_amount"),
         }
     return result
 
@@ -549,13 +580,17 @@ def fetch_market_fund_flow_dc(trade_date: str) -> dict[str, dict[str, Any]]:
         return {}
     result: dict[str, dict[str, Any]] = {}
     for _, r in df.iterrows():
+        def _amount(k: str) -> float | None:
+            v = _f(r.get(k))
+            return v * 10000 if v is not None else None
+
         result[r["ts_code"]] = {
-            "net_amount": _f(r.get("net_amount")) * 10000 if r.get("net_amount") is not None else None,
+            "net_amount": _amount("net_amount"),
             "net_amount_rate": _f(r.get("net_amount_rate")),
-            "buy_elg_amount": _f(r.get("buy_elg_amount")) * 10000 if r.get("buy_elg_amount") is not None else None,
-            "buy_lg_amount": _f(r.get("buy_lg_amount")) * 10000 if r.get("buy_lg_amount") is not None else None,
-            "buy_md_amount": _f(r.get("buy_md_amount")) * 10000 if r.get("buy_md_amount") is not None else None,
-            "buy_sm_amount": _f(r.get("buy_sm_amount")) * 10000 if r.get("buy_sm_amount") is not None else None,
+            "buy_elg_amount": _amount("buy_elg_amount"),
+            "buy_lg_amount": _amount("buy_lg_amount"),
+            "buy_md_amount": _amount("buy_md_amount"),
+            "buy_sm_amount": _amount("buy_sm_amount"),
         }
     return result
 
@@ -773,3 +808,227 @@ def _fmt_date(d: Any) -> str | None:
     if len(s) == 8 and s.isdigit():
         return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
     return s
+
+
+# ── 事件类 / 筹码类 / 融资融券数据 ───────────────────────────────────────────
+
+
+def fetch_pledge_detail(ts_code: str | None, start_date: str, end_date: str) -> list[dict[str, Any]]:
+    """股权质押明细。ts_code 为空时按公告日期区间全市场拉取；start_date/end_date 格式 YYYYMMDD。"""
+    pro = _pro()
+    params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
+    if ts_code:
+        params["ts_code"] = ts_code
+    df = _call_with_retry(lambda: pro.pledge_detail(
+        **params,
+        fields="ts_code,ann_date,holder_name,pledge_amount,start_date,end_date,is_release,"
+               "release_date,pledgor,holding_amount,pledged_amount,p_total_ratio,h_total_ratio,is_buyback",
+    ))
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "ts_code": str(r.get("ts_code", "")),
+            "ann_date": _fmt_date(r.get("ann_date")),
+            "holder_name": str(r.get("holder_name") or ""),
+            "pledge_amount": _f(r.get("pledge_amount")),
+            "start_date": _fmt_date(r.get("start_date")),
+            "end_date": _fmt_date(r.get("end_date")),
+            "is_release": str(r.get("is_release") or ""),
+            "release_date": _fmt_date(r.get("release_date")),
+            "pledgor": str(r.get("pledgor") or ""),
+            "holding_amount": _f(r.get("holding_amount")),
+            "pledged_amount": _f(r.get("pledged_amount")),
+            "p_total_ratio": _f(r.get("p_total_ratio")),
+            "h_total_ratio": _f(r.get("h_total_ratio")),
+            "is_buyback": str(r.get("is_buyback") or ""),
+        })
+    return rows
+
+
+def fetch_pledge_stat(ts_code: str, end_date: str) -> list[dict[str, Any]]:
+    """股权质押统计。end_date 格式 YYYYMMDD。"""
+    df = _call_with_retry(lambda: _pro().pledge_stat(
+        ts_code=ts_code, end_date=end_date,
+        fields="ts_code,end_date,pledge_count,unrest_pledge,rest_pledge,total_share,pledge_ratio",
+    ))
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "ts_code": str(r.get("ts_code", "")),
+            "end_date": _fmt_date(r.get("end_date")),
+            "pledge_count": int(r.get("pledge_count")) if r.get("pledge_count") is not None else None,
+            "unrest_pledge": _f(r.get("unrest_pledge")),
+            "rest_pledge": _f(r.get("rest_pledge")),
+            "total_share": _f(r.get("total_share")),
+            "pledge_ratio": _f(r.get("pledge_ratio")),
+        })
+    return rows
+
+
+def fetch_share_float(ts_code: str | None, start_date: str, end_date: str) -> list[dict[str, Any]]:
+    """限售股解禁。ts_code 为空时按公告日期区间全市场拉取；start_date/end_date 格式 YYYYMMDD。"""
+    pro = _pro()
+    params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
+    if ts_code:
+        params["ts_code"] = ts_code
+    df = _call_with_retry(lambda: pro.share_float(
+        **params,
+        fields="ts_code,ann_date,float_date,float_share,float_ratio,holder_name,share_type",
+    ))
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "ts_code": str(r.get("ts_code", "")),
+            "ann_date": _fmt_date(r.get("ann_date")),
+            "float_date": _fmt_date(r.get("float_date")),
+            "float_share": _f(r.get("float_share")),
+            "float_ratio": _f(r.get("float_ratio")),
+            "holder_name": str(r.get("holder_name") or ""),
+            "share_type": str(r.get("share_type") or ""),
+        })
+    return rows
+
+
+def fetch_repurchase(start_date: str, end_date: str) -> list[dict[str, Any]]:
+    """股票回购。start_date/end_date 格式 YYYYMMDD，按公告日期查询。"""
+    df = _call_with_retry(lambda: _pro().repurchase(
+        start_date=start_date, end_date=end_date,
+        fields="ts_code,ann_date,end_date,proc,exp_date,vol,amount,high_limit,low_limit",
+    ))
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "ts_code": str(r.get("ts_code", "")),
+            "ann_date": _fmt_date(r.get("ann_date")),
+            "end_date": _fmt_date(r.get("end_date")),
+            "proc": str(r.get("proc") or ""),
+            "exp_date": _fmt_date(r.get("exp_date")),
+            "vol": _f(r.get("vol")),
+            "amount": _f(r.get("amount")),
+            "high_limit": _f(r.get("high_limit")),
+            "low_limit": _f(r.get("low_limit")),
+        })
+    return rows
+
+
+def fetch_holder_trade(ts_code: str | None, start_date: str, end_date: str) -> list[dict[str, Any]]:
+    """股东增减持。ts_code 为空时按公告日期区间全市场拉取；start_date/end_date 格式 YYYYMMDD。"""
+    pro = _pro()
+    params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
+    if ts_code:
+        params["ts_code"] = ts_code
+    df = _call_with_retry(lambda: pro.stk_holdertrade(
+        **params,
+        fields="ts_code,ann_date,holder_name,holder_type,in_de,change_vol,change_ratio,"
+               "after_share,after_ratio,avg_price,total_share,begin_date,close_date",
+    ))
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "ts_code": str(r.get("ts_code", "")),
+            "ann_date": _fmt_date(r.get("ann_date")),
+            "holder_name": str(r.get("holder_name") or ""),
+            "holder_type": str(r.get("holder_type") or ""),
+            "in_de": str(r.get("in_de") or ""),
+            "change_vol": _f(r.get("change_vol")),
+            "change_ratio": _f(r.get("change_ratio")),
+            "after_share": _f(r.get("after_share")),
+            "after_ratio": _f(r.get("after_ratio")),
+            "avg_price": _f(r.get("avg_price")),
+            "total_share": _f(r.get("total_share")),
+            "begin_date": _fmt_date(r.get("begin_date")),
+            "close_date": _fmt_date(r.get("close_date")),
+        })
+    return rows
+
+
+def fetch_stk_holdernumber(ts_code: str, start_date: str, end_date: str) -> list[dict[str, Any]]:
+    """股东户数。start_date/end_date 格式 YYYYMMDD。"""
+    df = _call_with_retry(lambda: _pro().stk_holdernumber(
+        ts_code=ts_code, start_date=start_date, end_date=end_date,
+        fields="ts_code,ann_date,end_date,holder_num",
+    ))
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "ts_code": str(r.get("ts_code", "")),
+            "ann_date": _fmt_date(r.get("ann_date")),
+            "end_date": _fmt_date(r.get("end_date")),
+            "holder_num": int(r.get("holder_num")) if r.get("holder_num") is not None else None,
+        })
+    return rows
+
+
+def fetch_cyq_perf(ts_code: str, start_date: str, end_date: str) -> list[dict[str, Any]]:
+    """每日筹码及胜率。start_date/end_date 格式 YYYYMMDD。"""
+    df = _call_with_retry(lambda: _pro().cyq_perf(
+        ts_code=ts_code, start_date=start_date, end_date=end_date,
+        fields="ts_code,trade_date,his_low,his_high,cost_5pct,cost_15pct,cost_50pct,"
+               "cost_85pct,cost_95pct,weight_avg,winner_rate",
+    ))
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "ts_code": str(r.get("ts_code", "")),
+            "trade_date": _fmt_date(r.get("trade_date")),
+            "his_low": _f(r.get("his_low")),
+            "his_high": _f(r.get("his_high")),
+            "cost_5pct": _f(r.get("cost_5pct")),
+            "cost_15pct": _f(r.get("cost_15pct")),
+            "cost_50pct": _f(r.get("cost_50pct")),
+            "cost_85pct": _f(r.get("cost_85pct")),
+            "cost_95pct": _f(r.get("cost_95pct")),
+            "weight_avg": _f(r.get("weight_avg")),
+            "winner_rate": _f(r.get("winner_rate")),
+        })
+    return rows
+
+
+def fetch_broker_recommend(month: str) -> list[dict[str, Any]]:
+    """券商每月荐股。month 格式 YYYYMM。需要 6000 积分，5000 积分调用会报错。"""
+    df = _call_with_retry(lambda: _pro().broker_recommend(month=month))
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "month": str(r.get("month", "")),
+            "broker": str(r.get("broker") or ""),
+            "ts_code": str(r.get("ts_code", "")),
+            "name": str(r.get("name") or ""),
+        })
+    return rows
+
+
+def fetch_margin_detail(trade_date: str) -> dict[str, dict[str, Any]]:
+    """融资融券交易明细，按交易日全市场。trade_date 格式 YYYYMMDD。返回 {ts_code: {...}}。"""
+    df = _call_with_retry(lambda: _pro().margin_detail(trade_date=trade_date))
+    if df is None or df.empty:
+        return {}
+    result = {}
+    for _, r in df.iterrows():
+        result[r["ts_code"]] = {
+            "rzye": _f(r.get("rzye")),
+            "rqye": _f(r.get("rqye")),
+            "rzmre": _f(r.get("rzmre")),
+            "rqyl": _f(r.get("rqyl")),
+            "rzche": _f(r.get("rzche")),
+            "rqchl": _f(r.get("rqchl")),
+            "rqmcl": _f(r.get("rqmcl")),
+            "rzrqye": _f(r.get("rzrqye")),
+        }
+    return result

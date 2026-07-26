@@ -32,6 +32,8 @@ class V5SyncBody(BaseModel):
     skip_policy: bool = False
     skip_mood: bool = False
     skip_v5_scores: bool = False
+    skip_tushare_events: bool = False
+    tushare_event_days: int = Field(10, ge=1, le=365)
     announcement_limit: int = Field(30, ge=5, le=80)
     news_limit: int = Field(15, ge=5, le=50)
 
@@ -71,6 +73,8 @@ async def sync_v5(body: V5SyncBody | None = None):
         skip_policy=body.skip_policy,
         skip_mood=body.skip_mood,
         skip_v5_scores=body.skip_v5_scores,
+        skip_tushare_events=body.skip_tushare_events,
+        tushare_event_days=body.tushare_event_days,
         announcement_limit=body.announcement_limit,
         news_limit=body.news_limit,
     )

@@ -266,19 +266,26 @@ def main() -> int:
 
     results = []
     use_wf = payload.get("walkforward", True)
+    variant = payload.get("variant", "v2")
     for h in horizons:
-        if h == 20 and use_wf:
+        if (h == 20 and use_wf) or (h == 5 and variant == "v4"):
             from services.ml_walkforward import run_h20_walkforward
 
+            is_v4 = variant == "v4" and h == 5
             r = run_h20_walkforward(
                 db_path,
-                train_window_days=int(payload.get("wf_train_window_days", 480)),
-                step_days=int(payload.get("wf_step_days", 20)),
-                forward_days=20,
+                train_window_days=int(
+                    payload.get("wf_train_window_days", 60 if is_v4 else 480)
+                ),
+                step_days=int(
+                    payload.get("wf_step_days", 5 if is_v4 else 20)
+                ),
+                forward_days=h,
                 max_folds=payload.get("wf_max_folds"),
+                variant=variant,
             )
             if r.get("status") != "done":
-                r2 = _demo_train(db_path, 20)
+                r2 = _demo_train(db_path, h)
                 r2["note"] = f"wf fallback: {r.get('reason')}"
                 r = r2
         else:

@@ -14,6 +14,30 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 logging.basicConfig(level=logging.INFO)
 
 
+def _run_script_subprocess(script_name: str, args: list[str], timeout_sec: int = 1800) -> str:
+    """运行 backend/scripts 目录下的脚本，返回最后一行输出。"""
+    import os
+    import subprocess
+    import sys
+
+    script = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "scripts",
+        script_name,
+    )
+    r = subprocess.run(
+        [sys.executable, script] + args,
+        capture_output=True,
+        text=True,
+        timeout=timeout_sec,
+    )
+    lines = [ln for ln in (r.stdout or "").strip().split("\n") if ln.strip()]
+    last = lines[-1] if lines else ""
+    if r.returncode != 0:
+        raise RuntimeError(f"exit={r.returncode} stderr={(r.stderr or '')[-300:]}")
+    return last
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("job", choices=["nightly", "weekly", "daily", "technical_retry", "warm_cache", "warm_decay"])
@@ -37,6 +61,17 @@ def main() -> int:
 
         r = sync_v5_nightly_fetch()
         summary = f"ok={r.get('ok')} coverage={r.get('news_event_coverage')}"
+
+        # 日频 Tushare 数据：L2 资金流明细 + 沪深股通十大成交
+        for script_name, label, extra_args in [
+            ("tushare_sync_moneyflow_detail.py", "moneyflow", ["--days", "10"]),
+            ("tushare_sync_hsgt_top10.py", "hsgt_top10", ["--days", "10"]),
+        ]:
+            try:
+                last = _run_script_subprocess(script_name, extra_args, timeout_sec=1800)
+                summary += f" {label}={last[:60]}"
+            except Exception as e:
+                summary += f" {label}_err:{str(e)[:40]}"
     elif args.job == "weekly":
         from services.v5_data_sync import sync_v5_weekly
 
@@ -44,6 +79,17 @@ def main() -> int:
         steps = r.get("steps") or {}
         errs = {k: str(v.get("error"))[:80] for k, v in steps.items() if isinstance(v, dict) and v.get("error")}
         summary = f"ok={r.get('ok')} steps={list(steps.keys())} errors={errs or '无'}"
+
+        # 周频 Tushare 数据：业绩预告/快报 + 财报披露计划
+        for script_name, label, extra_args in [
+            ("tushare_sync_earnings_alerts.py", "earnings_alerts", ["--years", "1"]),
+            ("tushare_sync_disclosure_dates.py", "disclosure_dates", []),
+        ]:
+            try:
+                last = _run_script_subprocess(script_name, extra_args, timeout_sec=1800)
+                summary += f" {label}={last[:60]}"
+            except Exception as e:
+                summary += f" {label}_err:{str(e)[:40]}"
     elif args.job == "technical_retry":
         from services.batch_score_maintenance import retry_technical_no_source
 

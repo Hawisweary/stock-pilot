@@ -80,7 +80,7 @@ def _build_cross_section(
         i = next((j for j, bar in enumerate(series) if bar[0] == pred_date), -1)
         if i < lookback or i + forward_days >= len(series):
             continue
-        feats = compute_base_features(series, i, forward_days, sid, ctx)
+        feats = compute_base_features(series, i, forward_days, sid, ctx, variant)
         label = None
         if with_labels:
             close = series[i][1]
@@ -141,7 +141,7 @@ def _collect_train_samples(
         batch: list[dict] = []
         meta: list[tuple[int, float]] = []
         for code, sid, i, label in pending[dt]:
-            feats = compute_base_features(by_code[code], i, forward_days, sid, ctx)
+            feats = compute_base_features(by_code[code], i, forward_days, sid, ctx, variant)
             batch.append(feats)
             meta.append((sid, label))
         if len(batch) < 2:
@@ -169,17 +169,92 @@ def _collect_train_samples(
     return [s for s, ok in zip(samples, mask) if ok]
 
 
-def _fit_model(X_fit, y_fit, X_valid, y_valid, feat_names: list[str]):
+def _group_sizes(samples: list[LabeledSample]) -> list[int]:
+    """按 feature_idx 分组，返回每组样本数（LambdaRank 用）。"""
+    if not samples:
+        return []
+    groups = []
+    current = samples[0].feature_idx
+    count = 1
+    for s in samples[1:]:
+        if s.feature_idx == current:
+            count += 1
+        else:
+            groups.append(count)
+            current = s.feature_idx
+            count = 1
+    groups.append(count)
+    return groups
+
+
+def _quintile_labels(samples: list[LabeledSample]) -> list[int]:
+    """把每个交易日内的收益转成 1-5 quintile 整数标签（LambdaRank 用）。"""
+    if not samples:
+        return []
+    from collections import defaultdict
+
+    groups: dict[int, list[tuple[int, float]]] = defaultdict(list)
+    for idx, s in enumerate(samples):
+        groups[s.feature_idx].append((idx, s.y))
+    labels = [0] * len(samples)
+    for idxs_vals in groups.values():
+        idxs, vals = zip(*idxs_vals)
+        n = len(vals)
+        if n == 0:
+            continue
+        sorted_pos = sorted(range(n), key=lambda i: vals[i])
+        for rank, pos in enumerate(sorted_pos):
+            quintile = min(5, max(1, int(rank / n * 5) + 1))
+            labels[idxs[pos]] = quintile
+    return labels
+
+
+def _fit_model(
+    X_fit,
+    y_fit,
+    X_valid,
+    y_valid,
+    feat_names: list[str],
+    fit_samples: list[LabeledSample] | None = None,
+    valid_samples: list[LabeledSample] | None = None,
+    variant: str = "v2",
+):
     import numpy as np
 
     mode = "lightgbm"
     try:
         import lightgbm as lgb
 
-        train_data = lgb.Dataset(X_fit, label=y_fit, feature_name=feat_names)
-        valid_data = lgb.Dataset(X_valid, label=y_valid, feature_name=feat_names)
-        model = lgb.train(
-            {
+        if variant == "v4":
+            fit_group = _group_sizes(fit_samples or [])
+            valid_group = _group_sizes(valid_samples or [])
+            fit_labels = np.array(_quintile_labels(fit_samples or []), dtype=np.int32)
+            valid_labels = np.array(_quintile_labels(valid_samples or []), dtype=np.int32)
+            train_data = lgb.Dataset(
+                X_fit, label=fit_labels, group=fit_group, feature_name=feat_names
+            )
+            valid_data = lgb.Dataset(
+                X_valid, label=valid_labels, group=valid_group, feature_name=feat_names
+            )
+            params = {
+                "objective": "lambdarank",
+                "metric": "ndcg",
+                "lambdarank_truncation_level": 10,
+                "verbosity": -1,
+                "num_leaves": 15,
+                "max_depth": 5,
+                "learning_rate": 0.02,
+                "lambda_l1": 1.0,
+                "lambda_l2": 1.0,
+                "feature_fraction": 0.6,
+                "bagging_fraction": 0.7,
+                "bagging_freq": 1,
+                "min_data_in_leaf": 50,
+            }
+        else:
+            train_data = lgb.Dataset(X_fit, label=y_fit, feature_name=feat_names)
+            valid_data = lgb.Dataset(X_valid, label=y_valid, feature_name=feat_names)
+            params = {
                 "objective": "regression",
                 "metric": "l2",
                 "verbosity": -1,
@@ -190,7 +265,10 @@ def _fit_model(X_fit, y_fit, X_valid, y_valid, feat_names: list[str]):
                 "feature_fraction": 0.8,
                 "bagging_fraction": 0.8,
                 "bagging_freq": 1,
-            },
+            }
+
+        model = lgb.train(
+            params,
             train_data,
             num_boost_round=200,
             valid_sets=[valid_data],
@@ -292,8 +370,11 @@ def run_h20_walkforward(
         X_valid = np.array([s.x for s in valid_samples], dtype=np.float32)
         y_valid = np.array([s.y for s in valid_samples], dtype=np.float32)
 
-        model, mode, imp = _fit_model(X_fit, y_fit, X_valid, y_valid, feat_names)
-        train_rmse = rmse(model.predict(X_fit), y_fit.tolist())
+        model, mode, imp = _fit_model(
+            X_fit, y_fit, X_valid, y_valid, feat_names,
+            fit_samples=fit_samples, valid_samples=valid_samples, variant=variant,
+        )
+        train_rmse = rmse(model.predict(X_fit), y_fit.tolist()) if variant != "v4" else None
 
         oos = _build_cross_section(
             by_code,
@@ -390,6 +471,9 @@ def run_h20_walkforward(
                     np.array([s.x for s in valid_samples], dtype=np.float32),
                     np.array([s.y for s in valid_samples], dtype=np.float32),
                     feat_names,
+                    fit_samples=fit_samples,
+                    valid_samples=valid_samples,
+                    variant=variant,
                 )
                 live_mv = f"{mode}_h{forward_days}_wf_live"
                 pred_date = dates[-1]

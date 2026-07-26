@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -35,8 +36,19 @@ def _code_map(conn: sqlite3.Connection) -> dict[str, int]:
 
 def sync_l2(conn: sqlite3.Connection, code_map: dict[str, int], trading_days: list[str]) -> int:
     total = 0
+    batch_rows: list[tuple] = []
     for i, d in enumerate(trading_days, 1):
-        data = fetch_market_fund_flow_l2_detail(d)
+        data = None
+        for attempt in range(3):
+            try:
+                data = fetch_market_fund_flow_l2_detail(d)
+                break
+            except Exception as e:
+                print(f"[L2大小单] [{i}/{len(trading_days)}] {d}: 重试 {attempt + 1}/3, 错误: {e}")
+                time.sleep(5 + attempt * 5)
+        if data is None:
+            print(f"[L2大小单] [{i}/{len(trading_days)}] {d}: 跳过")
+            continue
         trade_date_fmt = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
         rows = []
         for ts_code, v in data.items():
@@ -50,16 +62,19 @@ def sync_l2(conn: sqlite3.Connection, code_map: dict[str, int], trading_days: li
                 v["buy_elg_amount"], v["sell_elg_amount"], v["net_mf_amount"],
             ))
         if rows:
+            batch_rows.extend(rows)
+            total += len(rows)
+        if batch_rows and (i % 10 == 0 or i == len(trading_days)):
             conn.executemany(
                 """INSERT OR REPLACE INTO stock_moneyflow_l2_daily
                    (stock_id, trade_date, buy_sm_amount, sell_sm_amount, buy_md_amount,
                     sell_md_amount, buy_lg_amount, sell_lg_amount, buy_elg_amount,
                     sell_elg_amount, net_mf_amount)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                rows,
+                batch_rows,
             )
             conn.commit()
-            total += len(rows)
+            batch_rows = []
         print(f"[L2大小单] [{i}/{len(trading_days)}] {d}: {len(rows)} 条")
     return total
 
@@ -96,13 +111,25 @@ def sync_dc(conn: sqlite3.Connection, code_map: dict[str, int], trading_days: li
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--days", type=int, default=10, help="回补最近 N 个交易日（默认10）")
+    parser.add_argument("--start-date", type=str, default=None, help="开始日期 YYYYMMDD")
+    parser.add_argument("--end-date", type=str, default=None, help="结束日期 YYYYMMDD")
+    parser.add_argument("--full-backfill", action="store_true", help="2010-01-01 起全历史回填")
     parser.add_argument("--skip-l2", action="store_true")
     parser.add_argument("--skip-dc", action="store_true")
     args = parser.parse_args()
 
-    end = date.today().strftime("%Y%m%d")
-    start = (date.today() - timedelta(days=int(args.days * 1.6) + 10)).strftime("%Y%m%d")
-    trading_days = _trading_days(start, end)[-args.days:]
+    if args.full_backfill:
+        start = "20100101"
+        end = date.today().strftime("%Y%m%d")
+    else:
+        end = args.end_date or date.today().strftime("%Y%m%d")
+        if args.start_date:
+            start = args.start_date
+        else:
+            start = (date.today() - timedelta(days=int(args.days * 1.6) + 10)).strftime("%Y%m%d")
+    trading_days = _trading_days(start, end)
+    if not args.full_backfill and not args.start_date:
+        trading_days = trading_days[-args.days:]
     print(f"资金流明细: {len(trading_days)} 个交易日 ({trading_days[0]}~{trading_days[-1]})")
 
     conn = sqlite3.connect(config.DB_PATH)

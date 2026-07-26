@@ -108,7 +108,12 @@ def _tier_from_revision(pct: float | None) -> int | None:
     return -2
 
 
-def _past_eps_fy2(conn: sqlite3.Connection, stock_id: int, as_of: str, days: int = 90) -> float | None:
+def _past_eps_fy2(
+    conn: sqlite3.Connection,
+    stock_id: int,
+    as_of: str,
+    days: int = 30,
+) -> float | None:
     cutoff = (date.fromisoformat(as_of) - timedelta(days=days)).isoformat()
     row = conn.execute(
         """SELECT eps_fy2 FROM stock_eps_forecast

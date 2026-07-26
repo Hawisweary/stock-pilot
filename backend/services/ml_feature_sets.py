@@ -36,7 +36,12 @@ H20_FEATURES = [
     "margin_chg_20",       # 融资余额20日变化%
     "revenue_yoy_q",       # 营收同比（季）
     "cfo_np",              # 经营现金流/净利润
-    "eps_revision_3m",     # 分析师 EPS 3M 修正（作1M代理）
+    "eps_revision_3m",     # 分析师 EPS 3M 修正（Eastmoney 备用）
+    "forecast_mid",        # Tushare 业绩预告最新增速中值
+    "earnings_surprise",   # Tushare 业绩快报 vs 预告 surprise
+    "earnings_revision",   # Tushare 业绩预告跨期修正
+    "yoy_dedu_np",         # Tushare 业绩快报扣非净利润增速
+    "yoy_sales",           # Tushare 业绩快报营收增速
     "pe_ttm",              # PE TTM（估值）
     "amp_std_20",          # 20日振幅标准差
     "rs_20_rank",          # 20日相对强度 rank
@@ -48,6 +53,7 @@ H20_FEATURES = [
     "miss_eps_revision_3m",
     "miss_industry_eps_rev",
     "miss_margin_chg_20",
+    "miss_earnings",
 ]
 
 H60_FEATURES = [
@@ -58,7 +64,12 @@ H60_FEATURES = [
     "revenue_yoy_q",       # 营收增速
     "cfo_np",              # 现金流质量
     "debt_ratio",          # 资产负债率
-    "eps_revision_3m",     # EPS 3M 修正
+    "eps_revision_3m",     # EPS 3M 修正（Eastmoney 备用）
+    "forecast_mid",        # Tushare 业绩预告最新增速中值
+    "earnings_surprise",   # Tushare 业绩 surprise
+    "earnings_revision",   # Tushare 业绩 revision
+    "yoy_dedu_np",         # Tushare 扣非增速
+    "yoy_sales",           # Tushare 营收增速
     "industry_eps_rev",    # 行业景气
     "mom_12m_skip1m",      # 12月动量剔除近1月
     "beta_60",             # 与池内等权市场60日相关
@@ -73,6 +84,7 @@ H60_FEATURES = [
     "miss_cfo_np",
     "miss_debt_ratio",
     "miss_eps_revision_3m",
+    "miss_earnings",
 ]
 
 # v3 实验:行业中性(cross-sectional 行业内分位)替换 raw 基本面 + 砍掉 miss flag。
@@ -84,10 +96,34 @@ H20_V3_FEATURES = [
     "margin_chg_20", "amp_std_20", "rs_20_rank", "illiq_20",
     # 行业景气 / 分析师修正(沿用)
     "industry_eps_rev", "eps_revision_3m",
+    # Tushare 业绩信号（主数据源，Eastmoney 备用）
+    "forecast_mid", "earnings_surprise", "earnings_revision", "yoy_dedu_np", "yoy_sales", "miss_earnings",
     # v3 核心:基本面行业内分位(替换 raw revenue_yoy_q / cfo_np,新增 quality)
     "ind_rank_revenue_yoy_q", "ind_rank_cfo_np", "ind_rank_quality",
     # 估值 raw 保留(valuation 仅有最新快照,无法做无未来偏差的历史分位)
     "pe_ttm",
+]
+
+# v4 实验：L2 个股资金流 + H5 短窗 + LambdaRank。
+# 所有资金流特征在 compute_base_features 输出原始值，apply_cross_section_ranks 转成截面 rank。
+H5_V4_FEATURES = [
+    # 技术面（精简，不展开 miss flag）
+    "pv_corr_5",
+    "reversal_5",
+    "vol_5",
+    "rsi_14",
+    "amihud_5",
+    "mom_5_rank",
+    "turnover_extreme",
+    # 资金流核心（截面 rank）
+    "mf_net_pct_rank",
+    "mf_elg_pct_rank",
+    "mf_lg_elg_buy_pct_rank",
+    "mf_sm_pct_rank",
+    "mf_net_5d_pct_rank",
+    "mf_5d_20d_ratio_rank",
+    "mf_consec_inflow_rank",
+    "mf_smart_vs_dumb_rank",
 ]
 
 HORIZON_FEATURE_NAMES: dict[int, list[str]] = {
@@ -98,6 +134,8 @@ HORIZON_FEATURE_NAMES: dict[int, list[str]] = {
 
 
 def feature_names_for(horizon: int, variant: str = "v2") -> list[str]:
+    if variant == "v4" and horizon == 5:
+        return list(H5_V4_FEATURES)
     if variant == "v3" and horizon == 20:
         return list(H20_V3_FEATURES)
     return list(HORIZON_FEATURE_NAMES.get(horizon, H20_FEATURES))
@@ -229,6 +267,9 @@ class MlFeatureContext:
     macro_dates: list[str] = field(default_factory=list)
     impute: ImputeTable = field(default_factory=ImputeTable)
     market_ret: dict[str, float] = field(default_factory=dict)
+    moneyflow_by_stock: dict[int, list[tuple[str, dict]]] = field(default_factory=dict)
+    earnings_forecast_by_stock: dict[int, list[tuple[str, str, dict]]] = field(default_factory=dict)
+    earnings_express_by_stock: dict[int, list[tuple[str, str, dict]]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, conn: sqlite3.Connection, dates: list[str]) -> MlFeatureContext:
@@ -330,6 +371,89 @@ class MlFeatureContext:
                 "usd_cnh": _sf(row[3]),
             }
         ctx.macro_dates = sorted(ctx.macro.keys())
+
+        # L2 个股资金流（v4 使用）。按 (stock_id, date) 预加载，date 升序。
+        # 只加载当前 fold 日期窗口前后 90 天（H5 训练窗 60 天 + 25 天滚动），避免全表加载。
+        if dates:
+            from datetime import datetime, timedelta
+
+            min_dt = datetime.strptime(min(dates), "%Y-%m-%d")
+            max_dt = datetime.strptime(max(dates), "%Y-%m-%d")
+            mf_start = (min_dt - timedelta(days=90)).strftime("%Y-%m-%d")
+            mf_end = max_dt.strftime("%Y-%m-%d")
+            mf_by_sid: dict[int, list] = defaultdict(list)
+            for row in _safe(
+                f"""SELECT stock_id, trade_date, buy_sm_amount, sell_sm_amount, buy_md_amount, sell_md_amount,
+                           buy_lg_amount, sell_lg_amount, buy_elg_amount, sell_elg_amount, net_mf_amount
+                    FROM stock_moneyflow_l2_daily
+                    WHERE trade_date BETWEEN '{mf_start}' AND '{mf_end}'"""
+            ):
+                sid = int(row[0])
+                mf_by_sid[sid].append((
+                    str(row[1]),
+                    {
+                        "buy_sm": _sf(row[2]),
+                        "sell_sm": _sf(row[3]),
+                        "buy_md": _sf(row[4]),
+                        "sell_md": _sf(row[5]),
+                        "buy_lg": _sf(row[6]),
+                        "sell_lg": _sf(row[7]),
+                        "buy_elg": _sf(row[8]),
+                        "sell_elg": _sf(row[9]),
+                        "net_mf": _sf(row[10]),
+                    },
+                ))
+            ctx.moneyflow_by_stock = {
+                sid: sorted(hist, key=lambda x: x[0]) for sid, hist in mf_by_sid.items()
+            }
+
+        # Tushare 业绩预告/快报：构造 earnings_surprise / earnings_revision。
+        # 数据量小，全量加载；按 stock_id 组织，ann_date 升序。
+        def _to_float_or_none(v):
+            if v is None:
+                return None
+            try:
+                f = float(v)
+                return f if math.isfinite(f) else None
+            except (TypeError, ValueError):
+                return None
+
+        ef_by_sid: dict[int, list] = defaultdict(list)
+        for row in _safe(
+            """SELECT stock_id, ann_date, period_end_date, p_change_min, p_change_max
+               FROM earnings_forecast
+               ORDER BY stock_id, ann_date"""
+        ):
+            ef_by_sid[int(row[0])].append((
+                str(row[1]),
+                str(row[2]),
+                {
+                    "p_change_min": _to_float_or_none(row[3]),
+                    "p_change_max": _to_float_or_none(row[4]),
+                },
+            ))
+        ctx.earnings_forecast_by_stock = {
+            sid: sorted(hist, key=lambda x: x[0]) for sid, hist in ef_by_sid.items()
+        }
+
+        ex_by_sid: dict[int, list] = defaultdict(list)
+        for row in _safe(
+            """SELECT stock_id, ann_date, period_end_date, yoy_sales, yoy_dedu_np
+               FROM earnings_express
+               ORDER BY stock_id, ann_date"""
+        ):
+            ex_by_sid[int(row[0])].append((
+                str(row[1]),
+                str(row[2]),
+                {
+                    "yoy_sales": _to_float_or_none(row[3]),
+                    "yoy_dedu_np": _to_float_or_none(row[4]),
+                },
+            ))
+        ctx.earnings_express_by_stock = {
+            sid: sorted(hist, key=lambda x: x[0]) for sid, hist in ex_by_sid.items()
+        }
+
         impute.finalize()
         ctx.impute = impute
 
@@ -362,6 +486,104 @@ class MlFeatureContext:
             "bond_10y": m.get("bond_10y", 0.0),
             "usd_cnh": m.get("usd_cnh", 0.0),
         }
+
+    def _moneyflow_window(self, stock_id: int, as_of: str, n: int) -> list[tuple[str, dict]]:
+        """返回某股在 as_of 及之前最近的 n 条资金流记录（date 升序）。"""
+        hist = self.moneyflow_by_stock.get(stock_id, [])
+        if not hist:
+            return []
+        idx = next((i for i, (dt, _) in enumerate(hist) if dt > as_of), len(hist))
+        return hist[max(0, idx - n):idx]
+
+    def _moneyflow_map(self, stock_id: int, as_of: str, n: int = 25) -> dict[str, dict]:
+        return {dt: rec for dt, rec in self._moneyflow_window(stock_id, as_of, n)}
+
+    def _latest_forecast(self, stock_id: int, as_of: str) -> dict | None:
+        """as_of 及之前最新的业绩预告。"""
+        hist = self.earnings_forecast_by_stock.get(stock_id, [])
+        if not hist:
+            return None
+        for dt, period, rec in reversed(hist):
+            if dt <= as_of:
+                return {"dt": dt, "period": period, "rec": rec}
+        return None
+
+    def _previous_forecast(self, stock_id: int, as_of: str) -> dict | None:
+        """as_of 及之前、与最新一期相邻的上一期业绩预告（用于算 revision）。"""
+        latest = self._latest_forecast(stock_id, as_of)
+        if not latest:
+            return None
+        hist = self.earnings_forecast_by_stock.get(stock_id, [])
+        # 取 period_end_date 严格小于最新期、且 ann_date 不超过 as_of 的前一期
+        candidates = [(dt, period, rec) for dt, period, rec in hist if period < latest["period"] and dt <= as_of]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        dt, period, rec = candidates[0]
+        return {"dt": dt, "period": period, "rec": rec}
+
+    def _latest_express(self, stock_id: int, as_of: str, period: str | None = None) -> dict | None:
+        """as_of 及之前最新业绩快报；若传 period，优先匹配同一报告期。"""
+        hist = self.earnings_express_by_stock.get(stock_id, [])
+        if not hist:
+            return None
+        if period:
+            for dt, p, rec in reversed(hist):
+                if dt <= as_of and p == period:
+                    return {"dt": dt, "period": p, "rec": rec}
+        for dt, p, rec in reversed(hist):
+            if dt <= as_of:
+                return {"dt": dt, "period": p, "rec": rec}
+        return None
+
+    def _earnings_signals(self, stock_id: int, as_of: str) -> dict[str, float]:
+        """Tushare 业绩预告/快报信号：surprise / revision / yoy。"""
+        latest = self._latest_forecast(stock_id, as_of)
+        if not latest:
+            return {}
+        rec = latest["rec"]
+        if is_valid(rec["p_change_min"]) and is_valid(rec["p_change_max"]):
+            forecast_mid = (rec["p_change_min"] + rec["p_change_max"]) / 2
+        elif is_valid(rec["p_change_min"]):
+            forecast_mid = rec["p_change_min"]
+        elif is_valid(rec["p_change_max"]):
+            forecast_mid = rec["p_change_max"]
+        else:
+            return {}
+
+        out: dict[str, float] = {
+            "forecast_mid": forecast_mid,
+            "earnings_revision": 0.0,
+            "earnings_surprise": 0.0,
+            "yoy_dedu_np": 0.0,
+            "yoy_sales": 0.0,
+        }
+
+        prev = self._previous_forecast(stock_id, as_of)
+        if prev:
+            pr = prev["rec"]
+            if is_valid(pr["p_change_min"]) and is_valid(pr["p_change_max"]):
+                prev_mid = (pr["p_change_min"] + pr["p_change_max"]) / 2
+            elif is_valid(pr["p_change_min"]):
+                prev_mid = pr["p_change_min"]
+            elif is_valid(pr["p_change_max"]):
+                prev_mid = pr["p_change_max"]
+            else:
+                prev_mid = None
+            if prev_mid is not None:
+                out["earnings_revision"] = forecast_mid - prev_mid
+
+        expr = self._latest_express(stock_id, as_of, latest["period"])
+        if expr:
+            yoy_np = expr["rec"].get("yoy_dedu_np")
+            yoy_sales = expr["rec"].get("yoy_sales")
+            if is_valid(yoy_np):
+                out["yoy_dedu_np"] = float(yoy_np)
+                out["earnings_surprise"] = out["yoy_dedu_np"] - forecast_mid
+            if is_valid(yoy_sales):
+                out["yoy_sales"] = float(yoy_sales)
+
+        return out
 
     def _fill_field(
         self,
@@ -398,6 +620,24 @@ class MlFeatureContext:
             else self.impute.lookup("quality_tier", ind) * 10
         )
         self._fill_field(stock_id, "eps_revision_3m", eps.get("revision_3m_pct"), miss_key="miss_eps_revision_3m", out=out)
+
+        # Tushare 业绩预告/快报信号
+        earnings = self._earnings_signals(stock_id, as_of)
+        if earnings:
+            out["forecast_mid"] = winsorize(earnings.get("forecast_mid", 0.0), *WINSOR_BOUNDS.get("forecast_mid", (-1e9, 1e9)))
+            out["earnings_surprise"] = winsorize(earnings.get("earnings_surprise", 0.0), *WINSOR_BOUNDS.get("earnings_surprise", (-1e9, 1e9)))
+            out["earnings_revision"] = winsorize(earnings.get("earnings_revision", 0.0), *WINSOR_BOUNDS.get("earnings_revision", (-1e9, 1e9)))
+            out["yoy_dedu_np"] = winsorize(earnings.get("yoy_dedu_np", 0.0), *WINSOR_BOUNDS.get("yoy_dedu_np", (-1e9, 1e9)))
+            out["yoy_sales"] = winsorize(earnings.get("yoy_sales", 0.0), *WINSOR_BOUNDS.get("yoy_sales", (-1e9, 1e9)))
+            out["miss_earnings"] = 0.0
+        else:
+            out["forecast_mid"] = 0.0
+            out["earnings_surprise"] = 0.0
+            out["earnings_revision"] = 0.0
+            out["yoy_dedu_np"] = 0.0
+            out["yoy_sales"] = 0.0
+            out["miss_earnings"] = 1.0
+
         self._fill_field(
             stock_id,
             "industry_eps_rev",
@@ -446,12 +686,80 @@ def _slice_bars(bars: list[QuoteBar], i: int) -> dict[str, list[float]]:
     }
 
 
+def _safe_div(n: float, d: float) -> float:
+    return n / d if d and d > 0 and math.isfinite(d) else 0.0
+
+
+def _cross_section_rank(values: list[float], missing: float = 0.5) -> list[float]:
+    """截面分位 [0,1]，跳过 NaN/None。"""
+    clean = [(i, v) for i, v in enumerate(values) if v is not None and isinstance(v, (int, float)) and math.isfinite(v)]
+    n = len(clean)
+    if n == 0:
+        return [missing] * len(values)
+    sorted_clean = sorted(clean, key=lambda x: x[1])
+    ranks: dict[int, float] = {}
+    for rank, (idx, _) in enumerate(sorted_clean):
+        ranks[idx] = (rank + 1) / n
+    return [ranks.get(i, missing) for i in range(len(values))]
+
+
+def _moneyflow_features(
+    stock_id: int,
+    as_of: str,
+    ctx: MlFeatureContext,
+    amounts: list[float],
+) -> dict[str, float]:
+    """v4 H5 资金流原始特征。后续 apply_cross_section_ranks 转 rank。"""
+    out: dict[str, float] = {}
+    hist = ctx._moneyflow_window(stock_id, as_of, 25)
+    if not hist:
+        return {
+            "mf_net_pct": 0.0,
+            "mf_elg_pct": 0.0,
+            "mf_lg_elg_buy_pct": 0.0,
+            "mf_sm_pct": 0.0,
+            "mf_net_5d_pct": 0.0,
+            "mf_5d_20d_ratio": 0.0,
+            "mf_consec_inflow": 0.0,
+            "mf_smart_vs_dumb": 0.0,
+        }
+
+    today_rec = hist[-1][1]
+    amount_today = amounts[-1] if amounts else 0.0
+    avg_amount_20 = sum(amounts[-20:]) / min(20, len(amounts)) if amounts else 0.0
+
+    out["mf_net_pct"] = _safe_div(today_rec["net_mf"], amount_today)
+    out["mf_elg_pct"] = _safe_div(today_rec["buy_elg"] - today_rec["sell_elg"], amount_today)
+    out["mf_lg_elg_buy_pct"] = _safe_div(today_rec["buy_lg"] + today_rec["buy_elg"], amount_today)
+    out["mf_sm_pct"] = _safe_div(today_rec["buy_sm"] - today_rec["sell_sm"], amount_today)
+
+    net_mf_5d = sum(rec["net_mf"] for _, rec in hist[-5:])
+    net_mf_20d = sum(rec["net_mf"] for _, rec in hist[-20:])
+    out["mf_net_5d_pct"] = _safe_div(net_mf_5d, avg_amount_20)
+    out["mf_5d_20d_ratio"] = _safe_div(net_mf_5d, net_mf_20d)
+
+    consec = 0
+    for _, rec in reversed(hist):
+        if rec["net_mf"] > 0:
+            consec += 1
+        else:
+            break
+    out["mf_consec_inflow"] = float(consec)
+
+    smart = today_rec["buy_lg"] + today_rec["buy_elg"] - today_rec["sell_lg"] - today_rec["sell_elg"]
+    dumb = today_rec["buy_sm"] - today_rec["sell_sm"]
+    out["mf_smart_vs_dumb"] = _safe_div(smart, dumb)
+
+    return out
+
+
 def compute_base_features(
     bars: list[QuoteBar],
     i: int,
     horizon: int,
     stock_id: int,
     ctx: MlFeatureContext,
+    variant: str = "v2",
 ) -> dict[str, float]:
     """计算单样本特征（不含横截面 rank）。"""
     s = _slice_bars(bars, i)
@@ -477,6 +785,9 @@ def compute_base_features(
         out["amihud_5"] = _amihud(c, a, 5)
         out["mom_5"] = _pct_ret(c, 5) * 100
         out["turnover_mean_5_raw"] = out["turnover_mean_5"]
+
+        if variant == "v4":
+            out.update(_moneyflow_features(stock_id, dt, ctx, a))
 
     elif horizon == 20:
         mom20 = _pct_ret(c, 20)
@@ -504,6 +815,12 @@ def compute_base_features(
         out["miss_cfo_np"] = aux["miss_cfo_np"]
         out["eps_revision_3m"] = aux["eps_revision_3m"]
         out["miss_eps_revision_3m"] = aux["miss_eps_revision_3m"]
+        out["forecast_mid"] = aux["forecast_mid"]
+        out["earnings_surprise"] = aux["earnings_surprise"]
+        out["earnings_revision"] = aux["earnings_revision"]
+        out["yoy_dedu_np"] = aux["yoy_dedu_np"]
+        out["yoy_sales"] = aux["yoy_sales"]
+        out["miss_earnings"] = aux["miss_earnings"]
         out["pe_ttm"] = aux["pe_ttm"]
         out["miss_pe_ttm"] = aux["miss_pe_ttm"]
         out["amp_std_20"] = _amp_std(h, l, c, 20) * 100
@@ -530,6 +847,12 @@ def compute_base_features(
         out["miss_debt_ratio"] = aux["miss_debt_ratio"]
         out["eps_revision_3m"] = aux["eps_revision_3m"]
         out["miss_eps_revision_3m"] = aux["miss_eps_revision_3m"]
+        out["forecast_mid"] = aux["forecast_mid"]
+        out["earnings_surprise"] = aux["earnings_surprise"]
+        out["earnings_revision"] = aux["earnings_revision"]
+        out["yoy_dedu_np"] = aux["yoy_dedu_np"]
+        out["yoy_sales"] = aux["yoy_sales"]
+        out["miss_earnings"] = aux["miss_earnings"]
         out["industry_eps_rev"] = aux["industry_eps_rev"]
         out["roe_proxy"] = aux["roe_proxy"]
         mom12 = _pct_ret(c, min(250, len(c) - 1))
@@ -591,6 +914,18 @@ def apply_cross_section_ranks(
             r["turnover_extreme"] = abs(pct - 0.5) * 2
             r.pop("mom_5", None)
             r.pop("turnover_mean_5_raw", None)
+        if variant == "v4":
+            for raw_key in (
+                "mf_net_pct", "mf_elg_pct", "mf_lg_elg_buy_pct", "mf_sm_pct",
+                "mf_net_5d_pct", "mf_5d_20d_ratio", "mf_consec_inflow", "mf_smart_vs_dumb",
+            ):
+                vals = [r.get(raw_key, float("nan")) for r in rows]
+                rank_key = f"{raw_key}_rank"
+                ranks = _cross_section_rank(vals)
+                for r, rank in zip(rows, ranks):
+                    r[rank_key] = rank
+                for r in rows:
+                    r.pop(raw_key, None)
     elif horizon == 20:
         moms = [r.get("mom_20", 0.0) for r in rows]
         n = len(rows)

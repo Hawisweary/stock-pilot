@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 34
+CURRENT_SCHEMA_VERSION = 50
 
 MIGRATIONS: list[tuple[int, str]] = [
     (2, """
@@ -947,6 +947,138 @@ MIGRATIONS: list[tuple[int, str]] = [
         -- factor_values 主键(stock_id,date,factor_id)无法服务按因子查询,
         -- MAX(date)/按因子取截面曾全表扫描4秒+(366MB表)
         CREATE INDEX IF NOT EXISTS idx_factor_values_fid_date ON factor_values(factor_id, date);
+    """),
+    (50, """
+        -- Tushare 事件类 / 筹码类 / 融资融券数据
+        CREATE TABLE IF NOT EXISTS stock_pledge_detail (
+            stock_id        INTEGER NOT NULL,
+            ann_date        TEXT NOT NULL,
+            holder_name     TEXT DEFAULT '',
+            pledge_amount   REAL,
+            start_date      TEXT,
+            end_date        TEXT,
+            is_release      TEXT,
+            release_date    TEXT,
+            pledgor         TEXT,
+            holding_amount  REAL,
+            pledged_amount  REAL,
+            p_total_ratio   REAL,
+            h_total_ratio   REAL,
+            is_buyback      TEXT,
+            updated_at      TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (stock_id, ann_date, holder_name, start_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pledge_detail_stock ON stock_pledge_detail(stock_id, ann_date);
+
+        CREATE TABLE IF NOT EXISTS stock_pledge_stat (
+            stock_id        INTEGER NOT NULL,
+            end_date        TEXT NOT NULL,
+            pledge_count    INTEGER,
+            unrest_pledge   REAL,
+            rest_pledge     REAL,
+            total_share     REAL,
+            pledge_ratio    REAL,
+            updated_at      TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (stock_id, end_date)
+        );
+
+        CREATE TABLE IF NOT EXISTS stock_share_float (
+            stock_id        INTEGER NOT NULL,
+            ann_date        TEXT NOT NULL,
+            float_date      TEXT NOT NULL,
+            float_share     REAL,
+            float_ratio     REAL,
+            holder_name     TEXT DEFAULT '',
+            share_type      TEXT,
+            updated_at      TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (stock_id, ann_date, float_date, holder_name, share_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_share_float_stock ON stock_share_float(stock_id, float_date);
+
+        CREATE TABLE IF NOT EXISTS stock_repurchase (
+            stock_id        INTEGER NOT NULL,
+            ann_date        TEXT NOT NULL,
+            end_date        TEXT,
+            proc            TEXT,
+            exp_date        TEXT,
+            vol             REAL,
+            amount          REAL,
+            high_limit      REAL,
+            low_limit       REAL,
+            updated_at      TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (stock_id, ann_date)
+        );
+
+        CREATE TABLE IF NOT EXISTS stock_holder_trade (
+            stock_id        INTEGER NOT NULL,
+            ann_date        TEXT NOT NULL,
+            holder_name     TEXT DEFAULT '',
+            holder_type     TEXT,
+            in_de           TEXT,
+            change_vol      REAL,
+            change_ratio    REAL,
+            after_share     REAL,
+            after_ratio     REAL,
+            avg_price       REAL,
+            total_share     REAL,
+            begin_date      TEXT,
+            close_date      TEXT,
+            updated_at      TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (stock_id, ann_date, holder_name, in_de, begin_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_holder_trade_stock ON stock_holder_trade(stock_id, ann_date);
+
+        CREATE TABLE IF NOT EXISTS stock_holdernumber (
+            stock_id        INTEGER NOT NULL,
+            ann_date        TEXT,
+            end_date        TEXT NOT NULL,
+            holder_num      INTEGER,
+            updated_at      TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (stock_id, end_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_holdernumber_stock ON stock_holdernumber(stock_id, end_date);
+
+        CREATE TABLE IF NOT EXISTS stock_cyq_perf (
+            stock_id        INTEGER NOT NULL,
+            trade_date      TEXT NOT NULL,
+            his_low         REAL,
+            his_high        REAL,
+            cost_5pct       REAL,
+            cost_15pct      REAL,
+            cost_50pct      REAL,
+            cost_85pct      REAL,
+            cost_95pct      REAL,
+            weight_avg      REAL,
+            winner_rate     REAL,
+            updated_at      TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (stock_id, trade_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cyq_perf_stock ON stock_cyq_perf(stock_id, trade_date);
+
+        CREATE TABLE IF NOT EXISTS broker_recommend_monthly (
+            month           TEXT NOT NULL,
+            broker          TEXT NOT NULL,
+            stock_id        INTEGER NOT NULL,
+            name            TEXT,
+            updated_at      TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (month, broker, stock_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS tushare_margin_detail (
+            stock_id        INTEGER NOT NULL,
+            trade_date      TEXT NOT NULL,
+            rzye            REAL,
+            rqye            REAL,
+            rzmre           REAL,
+            rqyl            REAL,
+            rzche           REAL,
+            rqchl           REAL,
+            rqmcl           REAL,
+            rzrqye          REAL,
+            updated_at      TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (stock_id, trade_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tushare_margin_date ON tushare_margin_detail(trade_date);
     """),
 ]
 
