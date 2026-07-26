@@ -221,15 +221,19 @@ def get_summary_for_date(
     top_vol = [
         {
             "stock_id": r[0],
+            "code": r[4] or "",
+            "name": r[5] or "",
             "realized_vol_20": r[1],
             "forecast_vol_20": r[2],
             "avg_turnover_20": r[3],
         }
         for r in conn.execute(
-            """SELECT stock_id, realized_vol_20, forecast_vol_20, avg_turnover_20
-               FROM volatility_forecast_daily
-               WHERE trade_date=?
-               ORDER BY forecast_vol_20 DESC LIMIT 20""",
+            """SELECT v.stock_id, v.realized_vol_20, v.forecast_vol_20, v.avg_turnover_20,
+                      s.code, s.name
+               FROM volatility_forecast_daily v
+               LEFT JOIN stocks s ON s.id = v.stock_id
+               WHERE v.trade_date=?
+               ORDER BY v.forecast_vol_20 DESC LIMIT 20""",
             (trade_date,),
         ).fetchall()
     ]

@@ -69,6 +69,7 @@ V5_REGIME_WEIGHT_DELTAS: dict[str, dict[str, float]] = {
     "strong_trend_down": {"quality": 0.05, "valuation": 0.05, "technical": -0.05, "capital": -0.05},
     "weak_trend_down": {"quality": 0.03, "valuation": 0.03, "technical": -0.03, "capital": -0.03},
     "high_volatility": {"quality": 0.05, "valuation": 0.03, "technical": -0.05, "capital": -0.03},
+    "liquidity_drought": {"quality": 0.05, "valuation": 0.03, "technical": -0.05, "capital": -0.05},
     "oscillation": {},
 }
 

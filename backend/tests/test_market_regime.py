@@ -2,11 +2,16 @@
 import os
 import sqlite3
 import sys
+import tempfile
 from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from services.market_regime import classify_regime, sync_regime
+from services.market_regime import (
+    classify_regime,
+    compute_market_features,
+    regime_label,
+)
 
 
 def _kline(n: int = 120, base: float = 100.0, regime: str = "oscillation") -> list[dict]:
@@ -32,6 +37,7 @@ def test_classify_trend_up():
     kline = _kline(120, regime="strong_trend_up")
     result = classify_regime(kline)
     assert result["regime"] == "strong_trend_up"
+    assert result["regime_label"] == "趋势上涨"
     assert result["return_20d"] > 0.05
     assert result["return_60d"] > 0.05
 
@@ -40,39 +46,63 @@ def test_classify_trend_down():
     kline = _kline(120, regime="strong_trend_down")
     result = classify_regime(kline)
     assert result["regime"] == "strong_trend_down"
+    assert result["regime_label"] == "趋势下跌"
 
 
 def test_classify_high_volatility():
     kline = _kline(120, regime="high_volatility")
     result = classify_regime(kline)
     assert result["regime"] == "high_volatility"
+    assert result["regime_label"] == "高波动"
     assert result["volatility_20"] > 0.30
 
 
-def test_sync_regime():
-    import tempfile
+def test_classify_liquidity_drought_with_features():
+    kline = _kline(120, regime="oscillation")
+    result = classify_regime(
+        kline,
+        features={
+            "ad_ratio": 0.48,
+            "amount_ratio_20": 0.50,
+            "rotation_speed": 0.4,
+            "avg_corr_20": 0.35,
+            "liquidity_score": 0.50,
+        },
+    )
+    assert result["regime"] == "liquidity_drought"
+    assert result["regime_label"] == "流动性枯竭"
+
+
+def test_regime_label_mapping():
+    assert regime_label("weak_trend_up") == "趋势上涨"
+    assert regime_label("oscillation") == "震荡"
+
+
+def _make_quotes_db() -> sqlite3.Connection:
     f = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     f.close()
     conn = sqlite3.connect(f.name)
+    conn.execute("CREATE TABLE stocks (id INTEGER PRIMARY KEY, industry_sw TEXT, is_active INT)")
     conn.execute(
-        """CREATE TABLE market_regime_daily (
-            trade_date TEXT PRIMARY KEY, index_code TEXT, regime TEXT,
-            rsi_14 REAL, volatility_20 REAL, adx REAL,
-            return_20d REAL, return_60d REAL, price_vs_ma20 REAL, price_vs_ma60 REAL,
-            updated_at TEXT)"""
+        """CREATE TABLE stock_daily_quotes (
+            stock_id INTEGER, trade_date TEXT, close REAL, amount REAL,
+            PRIMARY KEY (stock_id, trade_date))"""
     )
+    conn.execute("INSERT INTO stocks VALUES (1, '银行', 1), (2, '银行', 1), (3, '医药', 1)")
+    dates = [(date(2026, 7, 1) + timedelta(days=i)).isoformat() for i in range(15)]
+    for i, d in enumerate(dates):
+        conn.execute("INSERT INTO stock_daily_quotes VALUES (1, ?, ?, 1e9)", (d, 10 + i * 0.1))
+        conn.execute("INSERT INTO stock_daily_quotes VALUES (2, ?, ?, 1e9)", (d, 10 - i * 0.05))
+        conn.execute("INSERT INTO stock_daily_quotes VALUES (3, ?, ?, 5e8)", (d, 20 + i * 0.2))
     conn.commit()
+    return conn
 
-    kline = _kline(120, regime="strong_trend_up")
-    last_date = kline[-1]["date"]
-    result = sync_regime(conn, trade_date=last_date)
-    # sync_regime uses fetch_index_kline which is external, so we test classify_regime indirectly
-    # by writing manually
-    conn.execute(
-        """INSERT INTO market_regime_daily VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
-        (last_date, "sh000300", "strong_trend_up", 70.0, 0.15, 30.0, 0.06, 0.12, 0.03, 0.08),
-    )
-    conn.commit()
-    row = conn.execute("SELECT regime FROM market_regime_daily WHERE trade_date=?", (last_date,)).fetchone()
-    assert row[0] == "strong_trend_up"
+
+def test_compute_market_features():
+    conn = _make_quotes_db()
+    trade_date = (date(2026, 7, 1) + timedelta(days=14)).isoformat()
+    feats = compute_market_features(conn, trade_date)
+    assert feats["ad_ratio"] is not None
+    assert 0 <= feats["ad_ratio"] <= 1
+    assert feats["amount_ratio_20"] is not None
     conn.close()

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 53
+CURRENT_SCHEMA_VERSION = 54
 
 MIGRATIONS: list[tuple[int, str]] = [
     (2, """
@@ -1132,6 +1132,17 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         CREATE INDEX IF NOT EXISTS idx_vol_forecast_date ON volatility_forecast_daily(trade_date DESC);
         CREATE INDEX IF NOT EXISTS idx_vol_forecast_stock ON volatility_forecast_daily(stock_id, trade_date DESC);
+    """),
+    (54, """
+        -- 市场状态 Phase A 扩展特征
+        ALTER TABLE market_regime_daily ADD COLUMN ad_ratio REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN amount_ratio_20 REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN amount_slope_5 REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN rotation_speed REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN avg_corr_20 REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN ma20_slope REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN liquidity_score REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN regime_label TEXT;
     """),
 ]
 

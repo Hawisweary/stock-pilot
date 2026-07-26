@@ -18,8 +18,8 @@ def _make_db() -> sqlite3.Connection:
     f = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     f.close()
     conn = sqlite3.connect(f.name)
-    conn.execute("CREATE TABLE stocks (id INTEGER PRIMARY KEY, is_active INT)")
-    conn.execute("INSERT INTO stocks VALUES (1, 1)")
+    conn.execute("CREATE TABLE stocks (id INTEGER PRIMARY KEY, is_active INT, code TEXT, name TEXT)")
+    conn.execute("INSERT INTO stocks VALUES (1, 1, '000001', '测试股')")
     conn.execute(
         """CREATE TABLE stock_daily_quotes (
             stock_id INTEGER, trade_date TEXT, close REAL, volume REAL,

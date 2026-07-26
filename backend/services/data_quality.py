@@ -44,6 +44,37 @@ _RULE_WEIGHTS: dict[str, int] = {
     "newly_listed": 10,          # 新股上市60天内
 }
 
+# 展示用中文标签（API / 看板）
+FLAG_LABELS: dict[str, str] = {
+    "price_spike": "大涨大跌",
+    "price_gap": "剧烈震荡",
+    "volume_burst": "放量异常",
+    "turnover_burst": "换手激增",
+    "volume_price_divergence": "量价背离",
+    "pe_extreme": "PE异常",
+    "pe_jump": "PE突变",
+    "pb_extreme": "PB异常",
+    "fund_flow_divergence": "资金背离",
+    "fundamental_jump": "财务跳变",
+    "ex_rights_mismatch": "疑似未复权",
+    "suspended_with_trades": "停牌有成交",
+    "valuation_outdated": "估值过期",
+    "valuation_missing": "缺少估值",
+    "newly_listed": "新股",
+}
+
+
+def format_flags(flags: list[str] | str | None) -> list[str]:
+    """将规则 key 转为简洁中文标签。"""
+    if flags is None:
+        return []
+    if isinstance(flags, str):
+        try:
+            flags = json.loads(flags) if flags else []
+        except json.JSONDecodeError:
+            return [flags]
+    return [FLAG_LABELS.get(str(f), str(f)) for f in flags]
+
 
 class AnomalyDetector:
     def __init__(
@@ -545,7 +576,7 @@ def get_alerts_for_stock(
         {
             "trade_date": r[0],
             "anomaly_score": r[1],
-            "flags": json.loads(r[2]) if r[2] else [],
+            "flags": format_flags(r[2]),
             "severity": r[3],
             "created_at": r[4],
         }
@@ -575,15 +606,18 @@ def get_summary_for_date(
     top = [
         {
             "stock_id": r[0],
+            "code": r[4] or "",
+            "name": r[5] or "",
             "anomaly_score": r[1],
             "severity": r[2],
-            "flags": json.loads(r[3]) if r[3] else [],
+            "flags": format_flags(r[3]),
         }
         for r in conn.execute(
-            """SELECT stock_id, anomaly_score, severity, flags
-               FROM data_quality_alerts
-               WHERE trade_date=?
-               ORDER BY anomaly_score DESC LIMIT 20""",
+            """SELECT a.stock_id, a.anomaly_score, a.severity, a.flags, s.code, s.name
+               FROM data_quality_alerts a
+               LEFT JOIN stocks s ON s.id = a.stock_id
+               WHERE a.trade_date=?
+               ORDER BY a.anomaly_score DESC LIMIT 20""",
             (trade_date,),
         ).fetchall()
     ]

@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { formatDataQualityFlag } from "@/lib/dataQualityLabels";
 import { useToast } from "@/lib/useToast";
 import {
   AlertTriangle,
@@ -19,6 +21,8 @@ import {
 
 interface DataQualityAlert {
   stock_id: number;
+  code?: string;
+  name?: string;
   anomaly_score: number;
   severity: string;
   flags: string[];
@@ -35,6 +39,7 @@ interface MarketRegime {
   trade_date: string;
   index_code?: string;
   regime?: string;
+  regime_label?: string;
   rsi_14?: number;
   volatility_20?: number;
   adx?: number;
@@ -42,6 +47,12 @@ interface MarketRegime {
   return_60d?: number;
   price_vs_ma20?: number;
   price_vs_ma60?: number;
+  ma20_slope?: number;
+  ad_ratio?: number;
+  amount_ratio_20?: number;
+  rotation_speed?: number;
+  avg_corr_20?: number;
+  liquidity_score?: number;
   updated_at?: string;
 }
 
@@ -55,6 +66,8 @@ interface VolatilitySummary {
   avg_amihud_illiq_20: number;
   top_volatility: Array<{
     stock_id: number;
+    code?: string;
+    name?: string;
     realized_vol_20: number;
     forecast_vol_20: number;
     avg_turnover_20: number;
@@ -68,13 +81,34 @@ const SEVERITY_CONFIG: Record<string, { label: string; icon: typeof ShieldAlert;
 };
 
 const REGIME_LABELS: Record<string, string> = {
-  strong_trend_up: "强势上涨",
-  weak_trend_up: "弱势上涨",
-  strong_trend_down: "强势下跌",
-  weak_trend_down: "弱势下跌",
+  strong_trend_up: "趋势上涨",
+  weak_trend_up: "趋势上涨",
+  strong_trend_down: "趋势下跌",
+  weak_trend_down: "趋势下跌",
   oscillation: "震荡",
   high_volatility: "高波动",
+  liquidity_drought: "流动性枯竭",
 };
+
+function StockCell({ stockId, code, name }: { stockId: number; code?: string; name?: string }) {
+  if (code) {
+    return (
+      <Link
+        href={`/stocks/${code}`}
+        className="inline-flex flex-col hover:text-primary transition-colors"
+        title={`内部 ID: ${stockId}`}
+      >
+        <span className="font-mono text-xs">{code}</span>
+        <span className="text-sm font-medium">{name || "—"}</span>
+      </Link>
+    );
+  }
+  return (
+    <span className="font-mono text-muted-foreground" title="未找到股票代码">
+      #{stockId}
+    </span>
+  );
+}
 
 export function DataQualityDashboard() {
   const toast = useToast();
@@ -240,7 +274,7 @@ export function DataQualityDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {REGIME_LABELS[regime?.regime ?? ""] || regime?.regime || "—"}
+              {regime?.regime_label || REGIME_LABELS[regime?.regime ?? ""] || regime?.regime || "—"}
             </div>
             <div className="text-xs text-muted-foreground mt-2 space-y-1">
               <div className="flex justify-between">
@@ -250,6 +284,18 @@ export function DataQualityDashboard() {
               <div className="flex justify-between">
                 <span>20日波动</span>
                 <span className="font-mono">{(regime?.volatility_20 != null ? `${(regime.volatility_20 * 100).toFixed(2)}%` : "—")}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>涨跌家数比</span>
+                <span className="font-mono">{(regime?.ad_ratio != null ? `${(regime.ad_ratio * 100).toFixed(1)}%` : "—")}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>成交额/20日均</span>
+                <span className="font-mono">{(regime?.amount_ratio_20 != null ? `${(regime.amount_ratio_20 * 100).toFixed(0)}%` : "—")}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>行业轮动</span>
+                <span className="font-mono">{(regime?.rotation_speed != null ? `${(regime.rotation_speed * 100).toFixed(0)}%` : "—")}</span>
               </div>
               <div className="flex justify-between">
                 <span>20日收益</span>
@@ -309,7 +355,7 @@ export function DataQualityDashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-muted-foreground">
-                    <th className="text-left py-2 font-medium">股票ID</th>
+                    <th className="text-left py-2 font-medium">股票</th>
                     <th className="text-left py-2 font-medium">异常分</th>
                     <th className="text-left py-2 font-medium">级别</th>
                     <th className="text-left py-2 font-medium">标签</th>
@@ -321,7 +367,9 @@ export function DataQualityDashboard() {
                     const Icon = cfg.icon;
                     return (
                       <tr key={alert.stock_id} className="border-b last:border-0">
-                        <td className="py-2 font-mono">{alert.stock_id}</td>
+                        <td className="py-2">
+                          <StockCell stockId={alert.stock_id} code={alert.code} name={alert.name} />
+                        </td>
                         <td className="py-2 font-mono">{alert.anomaly_score.toFixed(1)}</td>
                         <td className="py-2">
                           <Badge variant="outline" className={cfg.className}>
@@ -332,8 +380,11 @@ export function DataQualityDashboard() {
                         <td className="py-2">
                           <div className="flex flex-wrap gap-1">
                             {alert.flags.map((flag) => (
-                              <span key={flag} className="text-[10px] px-1.5 py-0.5 rounded bg-muted">
-                                {flag}
+                              <span
+                                key={flag}
+                                className="text-[10px] px-1.5 py-0.5 rounded bg-muted"
+                              >
+                                {formatDataQualityFlag(flag)}
                               </span>
                             ))}
                           </div>
@@ -361,7 +412,7 @@ export function DataQualityDashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-muted-foreground">
-                    <th className="text-left py-2 font-medium">股票ID</th>
+                    <th className="text-left py-2 font-medium">股票</th>
                     <th className="text-left py-2 font-medium">预测波动率</th>
                     <th className="text-left py-2 font-medium">已实现波动率</th>
                     <th className="text-left py-2 font-medium">20日均换手</th>
@@ -370,7 +421,9 @@ export function DataQualityDashboard() {
                 <tbody>
                   {volatility.top_volatility.map((row) => (
                     <tr key={row.stock_id} className="border-b last:border-0">
-                      <td className="py-2 font-mono">{row.stock_id}</td>
+                      <td className="py-2">
+                        <StockCell stockId={row.stock_id} code={row.code} name={row.name} />
+                      </td>
                       <td className="py-2 font-mono">{(row.forecast_vol_20 * 100).toFixed(2)}%</td>
                       <td className="py-2 font-mono">{(row.realized_vol_20 * 100).toFixed(2)}%</td>
                       <td className="py-2 font-mono">{row.avg_turnover_20.toFixed(2)}%</td>

@@ -1189,7 +1189,7 @@ export const api = {
       trade_date: string;
       total_alerts: number;
       by_severity: Record<string, number>;
-      top_alerts: Array<{ stock_id: number; anomaly_score: number; severity: string; flags: string[] }>;
+      top_alerts: Array<{ stock_id: number; code?: string; name?: string; anomaly_score: number; severity: string; flags: string[] }>;
     }>(
       tradeDate
         ? `/v5/data-quality/summary?trade_date=${encodeURIComponent(tradeDate)}`
@@ -1248,6 +1248,8 @@ export const api = {
       avg_amihud_illiq_20: number;
       top_volatility: Array<{
         stock_id: number;
+        code?: string;
+        name?: string;
         realized_vol_20: number;
         forecast_vol_20: number;
         avg_turnover_20: number;
