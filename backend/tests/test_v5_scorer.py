@@ -77,6 +77,12 @@ def scorer_db(tmp_path, monkeypatch):
         CREATE TABLE stock_daily_quotes (
             stock_id INTEGER, trade_date TEXT, close REAL
         );
+        CREATE TABLE data_quality_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, stock_id INTEGER, trade_date TEXT,
+            anomaly_score REAL, flags TEXT, severity TEXT, isolation_score REAL,
+            created_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(stock_id, trade_date)
+        );
         INSERT INTO stock_daily_quotes VALUES (1, '2026-06-04', 10.0);
         INSERT INTO stocks VALUES (1, '300450', '先导智能', 1, '电力设备', '电池');
         INSERT INTO stock_v5_metrics VALUES (1, '2026-06-04', 2, -2, 5.0);
@@ -158,3 +164,57 @@ def test_compute_stock_v5(scorer_db, monkeypatch):
     assert row[1] == "discount"
     breakdown = json.loads(row[2])
     assert breakdown["tiers"]["quality"] == -2
+
+
+def test_veto_data_quality_exclude(scorer_db, monkeypatch):
+    import config
+    from services.v5_scorer import check_veto
+
+    monkeypatch.setattr(config, "DB_PATH", str(scorer_db))
+    conn = sqlite3.connect(scorer_db)
+    conn.execute(
+        "INSERT INTO data_quality_alerts (stock_id, trade_date, anomaly_score, flags, severity) VALUES (1, '2026-06-04', 85, '[\"price_spike\"]', 'critical')"
+    )
+    conn.commit()
+    conn.close()
+
+    status, reasons, flags = check_veto(1, {"quality": 0, "market_env": 0}, calc_date="2026-06-04")
+    assert status == "exclude"
+    assert flags.get("data_quality") is False
+    assert any("数据质量" in r for r in reasons)
+
+
+def test_veto_data_quality_discount(scorer_db, monkeypatch):
+    import config
+    from services.v5_scorer import check_veto
+
+    monkeypatch.setattr(config, "DB_PATH", str(scorer_db))
+    conn = sqlite3.connect(scorer_db)
+    conn.execute(
+        "INSERT INTO data_quality_alerts (stock_id, trade_date, anomaly_score, flags, severity) VALUES (1, '2026-06-04', 60, '[\"volume_burst\"]', 'warning')"
+    )
+    conn.commit()
+    conn.close()
+
+    status, reasons, flags = check_veto(1, {"quality": 0, "market_env": 0}, calc_date="2026-06-04")
+    assert status == "discount"
+    assert flags.get("data_quality")
+    assert any("数据质量" in r for r in reasons)
+
+
+def test_compute_stock_v5_data_quality_discount(scorer_db, monkeypatch):
+    import config
+    from services.v5_scorer import compute_stock_v5_tiers
+
+    monkeypatch.setattr(config, "DB_PATH", str(scorer_db))
+    conn = sqlite3.connect(scorer_db)
+    conn.execute(
+        "INSERT INTO data_quality_alerts (stock_id, trade_date, anomaly_score, flags, severity) VALUES (1, '2026-06-04', 60, '[\"volume_burst\"]', 'warning')"
+    )
+    conn.commit()
+    conn.close()
+
+    r = compute_stock_v5_tiers(1, market_env_tier=0, calc_date="2026-06-04")
+    assert r["veto_status"] == "discount"
+    assert r.get("discount_flags", {}).get("data_quality")
+    assert any("数据质量" in reason for reason in r.get("veto_reasons", []))

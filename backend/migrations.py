@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 50
+CURRENT_SCHEMA_VERSION = 51
 
 MIGRATIONS: list[tuple[int, str]] = [
     (2, """
@@ -1079,6 +1079,23 @@ MIGRATIONS: list[tuple[int, str]] = [
             PRIMARY KEY (stock_id, trade_date)
         );
         CREATE INDEX IF NOT EXISTS idx_tushare_margin_date ON tushare_margin_detail(trade_date);
+    """),
+    (51, """
+        -- Phase 1 数据质量告警
+        CREATE TABLE IF NOT EXISTS data_quality_alerts (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            stock_id        INTEGER NOT NULL,
+            trade_date      TEXT    NOT NULL,
+            anomaly_score   REAL    NOT NULL DEFAULT 0,
+            flags           TEXT    NOT NULL DEFAULT '[]',
+            severity        TEXT    NOT NULL DEFAULT 'info',
+            isolation_score REAL,
+            created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(stock_id, trade_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dqa_date ON data_quality_alerts(trade_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_dqa_stock ON data_quality_alerts(stock_id, trade_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_dqa_score ON data_quality_alerts(anomaly_score DESC);
     """),
 ]
 

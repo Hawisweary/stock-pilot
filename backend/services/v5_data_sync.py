@@ -17,6 +17,7 @@ from services.macro_sync import sync_macro_indicators
 from services.mood_scorer import compute_all_mood_v5
 from services.news_fetcher import sync_all_news
 from services.policy_event_sync import sync_policy_v5
+from services.data_quality import detect_and_write
 from services.ml_impute import impute_v5_tables
 from services.quality_metrics_calc import compute_all_v5_metrics
 from services.risk_scanner import scan_risk_flags
@@ -240,6 +241,13 @@ def sync_v5_data_sources(
             result["steps"]["impute_v5"] = impute_v5_tables(conn)
     except Exception as e:
         result["steps"]["impute_v5"] = {"error": str(e)}
+
+    try:
+        with sqlite3.connect(config.DB_PATH, timeout=120) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")
+            result["steps"]["data_quality"] = detect_and_write(conn)
+    except Exception as e:
+        result["steps"]["data_quality"] = {"error": str(e)}
 
     if not opts["skip_eps_revision"]:
         try:

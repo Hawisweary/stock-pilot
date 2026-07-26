@@ -57,6 +57,10 @@ DEFAULT_SCORE = 50.0  # 保留供历史读取，禁止用于新写入
 V5_QUALITY_DISCOUNT_MULT = float(os.getenv("V5_QUALITY_DISCOUNT_MULT", "0.70"))
 # A-4：capital 主力净流出判 -2 的阈值（原 -5e7，放宽至 -1.5亿）
 V5_CAPITAL_FLOW_MINUS2_THRESHOLD = float(os.getenv("V5_CAPITAL_FLOW_MINUS2", "-1.5e8"))
+# DQ-1：数据质量异常（anomaly_score>=50）对 V5 综合分的折扣
+V5_DATA_QUALITY_DISCOUNT_MULT = float(os.getenv("V5_DATA_QUALITY_DISCOUNT_MULT", "0.70"))
+# DQ-1：数据质量异常直接排除的阈值（anomaly_score>=80）
+V5_DATA_QUALITY_EXCLUDE_THRESHOLD = float(os.getenv("V5_DATA_QUALITY_EXCLUDE_THRESHOLD", "80.0"))
 
 # M1：动量 profile 的 quality_minus2 折扣（比 value 宽松，但仍保留惩罚）
 V5_MOMENTUM_QUALITY_DISCOUNT_MULT = float(os.getenv("V5_MOMENTUM_QUALITY_DISCOUNT_MULT", "0.85"))

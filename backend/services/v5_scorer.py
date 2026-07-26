@@ -528,9 +528,11 @@ def _apply_veto_discounts(
     quality_minus2: bool = False,
     market_minus2: bool = False,
     macro_cold: bool = False,
+    data_quality: bool = False,
 ) -> float:
-    """财务/宏观类否决改为折扣，保留极端行情机会。
+    """财务/宏观/数据质量类否决改为折扣，保留极端行情机会。
     A-1 修复：quality_minus2 去掉固定 -10，改为纯乘数（配置 V5_QUALITY_DISCOUNT_MULT）。
+    DQ-1：数据质量异常分 >=50 时折扣。
     短板惩罚层已独立扣分，不需再减常数。
     """
     result = composite
@@ -540,6 +542,8 @@ def _apply_veto_discounts(
         result = result * 0.7
     if macro_cold:
         result = result * 0.8
+    if data_quality:
+        result = result * config.V5_DATA_QUALITY_DISCOUNT_MULT
     return max(0.0, result)
 
 
@@ -548,6 +552,7 @@ def check_veto(
     tiers: dict[str, int | None],
     *,
     conn: sqlite3.Connection | None = None,
+    calc_date: str | None = None,
 ) -> tuple[str, list[str], dict[str, bool]]:
     """返回 (veto_status, reasons, discount_flags)。status: ok | discount | exclude"""
     own = conn is None
@@ -558,6 +563,7 @@ def check_veto(
         "quality_minus2": False,
         "market_minus2": False,
         "macro_cold": False,
+        "data_quality": False,
     }
     try:
         from services.risk_scanner import has_veto_risk
@@ -565,6 +571,23 @@ def check_veto(
         if has_veto_risk(stock_id):
             reasons.append("风险标记(立案/非标/连跌停/ST)")
             return "exclude", reasons, discounts
+
+        # DQ-1：数据质量异常检查
+        as_of = calc_date or latest_trading_date()
+        dq_row = conn.execute(
+            """SELECT anomaly_score, flags, severity FROM data_quality_alerts
+               WHERE stock_id=? AND trade_date<=?
+               ORDER BY trade_date DESC LIMIT 1""",
+            (stock_id, as_of),
+        ).fetchone()
+        if dq_row:
+            dq_score = float(dq_row[0]) if dq_row[0] is not None else 0.0
+            if dq_score >= config.V5_DATA_QUALITY_EXCLUDE_THRESHOLD:
+                reasons.append(f"数据质量异常分数={dq_score:.0f}>=阈值(排除)")
+                return "exclude", reasons, discounts
+            if dq_score >= 50:
+                reasons.append(f"数据质量异常分数={dq_score:.0f}(折扣×{config.V5_DATA_QUALITY_DISCOUNT_MULT})")
+                discounts["data_quality"] = True
 
         q = tiers.get("quality")
         if q is not None and int(q) <= -2:
@@ -596,6 +619,7 @@ def compute_stock_v5_tiers(
     *,
     conn: sqlite3.Connection | None = None,
     market_env_tier: int | None = None,
+    calc_date: str | None = None,
 ) -> dict[str, Any]:
     own = conn is None
     if own:
@@ -778,7 +802,7 @@ def compute_stock_v5_tiers(
         raw_composite = max(0.0, base - penalty)
 
         veto_status, veto_reasons, discount_flags = check_veto(
-            stock_id, tiers, conn=conn
+            stock_id, tiers, conn=conn, calc_date=calc_date
         )
         composite_v5 = raw_composite
         if veto_status == "exclude":
@@ -789,6 +813,7 @@ def compute_stock_v5_tiers(
                 quality_minus2=discount_flags.get("quality_minus2", False),
                 market_minus2=discount_flags.get("market_minus2", False),
                 macro_cold=discount_flags.get("macro_cold", False),
+                data_quality=discount_flags.get("data_quality", False),
             )
 
         dim_scores = {
@@ -986,7 +1011,7 @@ def compute_all_v5_scores(
     for sid in ids:
         conn = _db_connect()
         try:
-            r = compute_stock_v5_tiers(sid, conn=conn)
+            r = compute_stock_v5_tiers(sid, conn=conn, calc_date=as_of)
             if not r:
                 continue
             # C2 fix: 若所有 10 个维度都缺失，跳过写入避免产生全空综合分

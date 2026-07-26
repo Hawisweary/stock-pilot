@@ -449,3 +449,33 @@ async def v5_scores_bulk(body: BulkScoreBody):
         ids,
     ).fetchall()
     return {"scores": [dict(r) for r in rows], "count": len(rows)}
+
+
+@router.get("/data-quality/summary")
+async def data_quality_summary(trade_date: str | None = None):
+    """按交易日获取数据质量异常摘要（总数量、分级、TOP20）。"""
+    from database import get as get_db_conn
+    from services.data_quality import get_summary_for_date
+
+    conn = get_db_conn()
+    return get_summary_for_date(conn, trade_date)
+
+
+@router.get("/data-quality/stock/{stock_id}")
+async def data_quality_for_stock(stock_id: int, limit: int = Query(30, ge=1, le=200)):
+    """获取某只股票的历史数据质量告警。"""
+    from database import get as get_db_conn
+    from services.data_quality import get_alerts_for_stock
+
+    conn = get_db_conn()
+    return {"stock_id": stock_id, "alerts": get_alerts_for_stock(conn, stock_id, limit)}
+
+
+@router.post("/data-quality/detect")
+async def data_quality_detect(trade_date: str | None = None):
+    """手动触发某交易日的数据质量检测（幂等）。"""
+    from database import get as get_db_conn
+    from services.data_quality import detect_and_write
+
+    conn = get_db_conn()
+    return detect_and_write(conn, trade_date=trade_date)
