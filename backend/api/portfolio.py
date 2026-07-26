@@ -99,21 +99,25 @@ async def list_portfolios(x_portfolio_owner: Optional[str] = Header(default=None
 
 @router.get("/pnl-summary")
 async def pnl_summary():
-    """所有组合盈亏摘要：总成本 / 市值 / 浮盈浮亏。"""
+    """所有组合盈亏摘要：去重持仓总览 + 各策略累计/今日盈亏。"""
     from services.portfolio_svc import get_pnl_summary
 
-    result = get_pnl_summary()
-    total_all_cost = sum(r["total_cost"] for r in result)
-    total_all_mv = sum(r["total_market_value"] for r in result)
-    total_all_pnl = total_all_mv - total_all_cost
+    data = get_pnl_summary()
+    deduped = data.get("deduped") or {}
     return {
-        "portfolios": result,
+        "portfolios": data.get("portfolios") or [],
         "summary": {
-            "total_cost": round(total_all_cost, 2),
-            "total_market_value": round(total_all_mv, 2),
-            "total_pnl": round(total_all_pnl, 2),
-            "total_pnl_pct": round(total_all_pnl / total_all_cost * 100, 2) if total_all_cost > 0 else 0,
-        }
+            "total_cost": deduped.get("total_cost", 0),
+            "total_market_value": deduped.get("total_market_value", 0),
+            "total_pnl": deduped.get("total_pnl", 0),
+            "total_pnl_pct": deduped.get("total_pnl_pct", 0),
+            "market_pnl_pct": deduped.get("market_pnl_pct", 0),
+            "today_pnl_pct": deduped.get("today_pnl_pct", 0),
+            "stock_count": deduped.get("stock_count", 0),
+            "position_count": deduped.get("position_count", 0),
+        },
+        "strategy_aggregate": data.get("strategy_aggregate"),
+        "meta": data.get("meta"),
     }
 
 

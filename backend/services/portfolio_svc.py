@@ -25,6 +25,12 @@ from services.trading_rules import (
 )
 from services.strategy_registry import get_meta, is_valid_strategy, normalize_strategy_id
 from services.strategy_selector import select_sector_rebalance, select_top_n_dicts
+from services.pnl_metrics import (
+    aggregate_totals,
+    build_position_pnl,
+    dedupe_positions,
+    estimated_buy_friction_pct,
+)
 
 
 def _ensure_tables(conn: sqlite3.Connection) -> None:
@@ -419,21 +425,40 @@ def get_portfolios(rt_cache: dict[str, dict] | None = None) -> list:
     return rows
 
 
-def get_pnl_summary(rt_cache: dict[str, dict] | None = None) -> list:
-    """所有组合的盈亏摘要（仅持仓成本/市值/浮盈），2 次 SQL 查询覆盖全部组合。
+def _fetch_prev_closes(conn: sqlite3.Connection, stock_ids: list[int]) -> dict[int, float]:
+    """各股票上一交易日收盘价（用于今日盈亏）。"""
+    if not stock_ids:
+        return {}
+    placeholders = ",".join("?" * len(stock_ids))
+    rows = conn.execute(
+        f"""SELECT stock_id, close FROM (
+               SELECT stock_id, close,
+                      ROW_NUMBER() OVER (PARTITION BY stock_id ORDER BY trade_date DESC) AS rn
+               FROM stock_daily_quotes
+               WHERE stock_id IN ({placeholders}) AND close IS NOT NULL
+            ) WHERE rn = 2""",
+        stock_ids,
+    ).fetchall()
+    return {int(r[0]): float(r[1]) for r in rows if r[1] is not None}
 
-    与 get_portfolio() 不同：不查 trade_journal / snapshots / _sellable_shares，
-    这些字段 pnl-summary 用不到，跳过能把 N 个组合的开销从 N*(4~5次查询) 降到 O(1)。
-    """
+
+def get_pnl_summary(rt_cache: dict[str, dict] | None = None) -> dict:
+    """所有组合的盈亏摘要（累计 / 今日 / 去重持仓 / 交易成本说明）。"""
     if rt_cache is None:
         rt_cache = fetch_rt_cache_for_all_portfolios()
-    conn = connect_db(ro=True)  # 只读:不被批任务写锁阻塞(见 get_portfolios 说明)
+    conn = connect_db(ro=True)
     conn.row_factory = sqlite3.Row
     portfolios = [dict(r) for r in conn.execute("SELECT id, name FROM portfolios ORDER BY created_at DESC").fetchall()]
     all_positions = conn.execute(
-        """SELECT pp.portfolio_id, pp.stock_id, pp.shares, pp.avg_cost, s.code, s.name
+        """SELECT pp.portfolio_id, pp.stock_id, pp.shares, pp.avg_cost, pp.buy_date,
+                  s.code, s.name
            FROM portfolio_positions pp JOIN stocks s ON pp.stock_id = s.id"""
     ).fetchall()
+    ctx = get_market_context(conn)
+    calendar_date = ctx.calendar_date
+    trade_date = get_effective_trade_date(ctx)
+    stock_ids = sorted({int(r["stock_id"]) for r in all_positions})
+    prev_closes = _fetch_prev_closes(conn, stock_ids)
     conn.close()
 
     code_pairs_all = [(r["code"], r["stock_id"]) for r in all_positions]
@@ -446,42 +471,74 @@ def get_pnl_summary(rt_cache: dict[str, dict] | None = None) -> list:
     else:
         mark_prices = {}
 
+    pf_names = {p["id"]: p.get("name", "") for p in portfolios}
     by_portfolio: dict[int, list] = {}
+    flat_for_dedupe: list[dict] = []
+
     for r in all_positions:
         pid = r["portfolio_id"]
+        sid = int(r["stock_id"])
         meta = mark_prices.get(r["code"], {})
         price = meta.get("price", 0) or 0
-        shares = r["shares"] or 0
-        avg_cost = r["avg_cost"] or 0
-        market_value = round(shares * price, 2)
-        cost = shares * avg_cost
-        pnl = round(market_value - cost, 2)
-        pnl_pct = round(pnl / cost * 100, 2) if cost > 0 else 0
-        by_portfolio.setdefault(pid, []).append({
-            "code": r["code"], "name": r["name"],
-            "shares": shares, "avg_cost": avg_cost,
-            "price": price, "market_value": market_value,
-            "pnl": pnl, "pnl_pct": pnl_pct,
-        })
+        pos = build_position_pnl(
+            code=r["code"],
+            name=r["name"],
+            stock_id=sid,
+            shares=r["shares"] or 0,
+            avg_cost=r["avg_cost"] or 0,
+            buy_date=r["buy_date"] or "",
+            price=price,
+            prev_close=prev_closes.get(sid),
+            calendar_date=trade_date,
+        )
+        pos["bought_today"] = bool(
+            r["buy_date"] and trade_date and str(r["buy_date"])[:10] == str(trade_date)[:10]
+        )
+        by_portfolio.setdefault(pid, []).append(pos)
+        flat_for_dedupe.append({**pos, "portfolio_name": pf_names.get(pid, "")})
 
     result = []
     for pf in portfolios:
         positions = by_portfolio.get(pf["id"], [])
-        total_cost = sum(p["avg_cost"] * p["shares"] for p in positions if p.get("shares"))
-        total_mv = sum(p.get("market_value", 0) for p in positions)
-        total_pnl = total_mv - total_cost
-        pnl_pct = round(total_pnl / total_cost * 100, 2) if total_cost > 0 else 0
+        totals = aggregate_totals(positions)
+        all_bought_today = bool(positions) and all(p.get("bought_today") for p in positions)
         result.append({
             "id": pf["id"],
             "name": pf.get("name", ""),
-            "position_count": len(positions),
-            "total_cost": round(total_cost, 2),
-            "total_market_value": round(total_mv, 2),
-            "total_pnl": round(total_pnl, 2),
-            "total_pnl_pct": pnl_pct,
+            "position_count": totals["position_count"],
+            "total_cost": totals["total_cost"],
+            "total_market_value": totals["total_market_value"],
+            "total_pnl": totals["total_pnl"],
+            "total_pnl_pct": totals["total_pnl_pct"],
+            "market_pnl_pct": totals["market_pnl_pct"],
+            "today_pnl_pct": totals["today_pnl_pct"],
+            "all_bought_today": all_bought_today,
             "positions": positions,
         })
-    return result
+
+    deduped = dedupe_positions(
+        flat_for_dedupe, prev_closes=prev_closes, calendar_date=calendar_date
+    )
+    strategy_totals = aggregate_totals(flat_for_dedupe)
+
+    friction_pct = estimated_buy_friction_pct()
+    return {
+        "portfolios": result,
+        "deduped": aggregate_totals(deduped) | {
+            "stock_count": len(deduped),
+            "positions": deduped,
+        },
+        "strategy_aggregate": {
+            **strategy_totals,
+            "portfolio_count": len(result),
+            "note": "各策略持仓简单相加，同一股票在多策略中会重复计入",
+        },
+        "meta": {
+            "calendar_date": calendar_date,
+            "friction_pct": friction_pct,
+            "friction_note": f"买入成本含滑点+佣金约 {friction_pct:.2f}%，新建仓累计浮盈接近该值属正常",
+        },
+    }
 
 
 def delete_portfolio(portfolio_id: int) -> dict:
