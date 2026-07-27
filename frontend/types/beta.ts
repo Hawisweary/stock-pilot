@@ -115,6 +115,11 @@ export type PortfolioPosition = {
   market_value: number;
   pnl: number;
   pnl_pct: number;
+  market_pnl_pct?: number;
+  today_pnl_pct?: number;
+  display_pnl_pct?: number;
+  is_friction_only?: boolean;
+  bought_today?: boolean;
   weight_pct: number;
   buy_date?: string;
   sellable_shares: number;
@@ -230,6 +235,14 @@ export type PortfolioDetail = {
   total_value: number;
   pnl: number;
   pnl_pct: number;
+  account_pnl?: number;
+  account_pnl_pct?: number;
+  unrealized_pnl?: number;
+  unrealized_pnl_pct?: number;
+  market_unrealized_pnl_pct?: number;
+  display_unrealized_pnl_pct?: number;
+  is_unrealized_friction_only?: boolean;
+  realized_pnl?: number;
   created_at?: string;
   positions: PortfolioPosition[];
   journal: TradeJournalEntry[];

@@ -19,7 +19,7 @@ def register_blueprints(app: FastAPI):
     from api.data import router as data_router
     from api.financials import router as financials_router
     from api.scores import router as scores_router
-    from api.dashboard import router as dashboard_router
+    from api.dashboard import router as dashboard_router, legacy_ml_router
     from api.ai import router as ai_router
     from api.analysis import router as analysis_router
     from api.technical import router as technical_router
@@ -48,6 +48,7 @@ def register_blueprints(app: FastAPI):
     app.include_router(financials_router)
     app.include_router(scores_router)
     app.include_router(dashboard_router)
+    app.include_router(legacy_ml_router)
     app.include_router(ai_router)
     app.include_router(analysis_router)
     app.include_router(technical_router)

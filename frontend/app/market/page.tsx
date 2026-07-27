@@ -102,6 +102,11 @@ const TradeCalendarCard = dynamic(
   { loading: () => <div className="rounded-lg border h-64 animate-pulse" />, ssr: false },
 );
 
+const MarketRegimeCard = dynamic(
+  () => import("@/components/MarketRegimeCard").then((m) => ({ default: m.MarketRegimeCard })),
+  { loading: () => <div className="rounded-lg border h-48 animate-pulse" />, ssr: false },
+);
+
 const MarketBreadthCard = dynamic(
   () => import("@/components/MarketBreadthCard").then((m) => ({ default: m.MarketBreadthCard })),
   { loading: () => <div className="rounded-lg border h-48 animate-pulse" />, ssr: false },
@@ -182,6 +187,7 @@ export default function MarketPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <MacroIndicatorsPanel refreshKey={refreshKey} />
         <div className="space-y-4">
+          <MarketRegimeCard />
           <SectorRotationCard refreshKey={refreshKey} />
           <ThsHotspotsCard refreshKey={refreshKey} />
           <TradeCalendarCard />

@@ -27,7 +27,10 @@ export function UpcomingEarningsCard() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading || events.length === 0) return null;
+  if (loading) {
+    return <div className="h-28 bg-muted animate-pulse rounded-lg" />;
+  }
+  if (events.length === 0) return null;
 
   return (
     <Card>

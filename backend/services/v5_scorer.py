@@ -1001,8 +1001,16 @@ def _latest_comprehensive_calc_date(
 
 
 def _format_v5_response(result: dict[str, Any]) -> dict[str, Any]:
+    from services.market_regime import describe_regime_weight_deltas, get_regime_guidance, regime_label
+
+    regime = str(result.get("market_regime") or "oscillation")
+    guidance = get_regime_guidance(regime)
+    weight_note = describe_regime_weight_deltas(regime)
     return {
         **result,
+        "market_regime_label": regime_label(regime),
+        "weight_note": weight_note,
+        "regime_guidance": guidance,
         "labels": V5_LABELS,
         "breakdown": {
             "tiers": result.get("tiers"),
@@ -1016,6 +1024,10 @@ def _format_v5_response(result: dict[str, Any]) -> dict[str, Any]:
             "effective_weights": result.get("effective_weights"),
             "market_beta": result.get("market_beta"),
             "capital_breakdown": result.get("capital_breakdown"),
+            "market_regime": regime,
+            "market_regime_label": regime_label(regime),
+            "weight_note": weight_note,
+            "regime_guidance": guidance,
         },
     }
 

@@ -442,18 +442,53 @@ def _fetch_prev_closes(conn: sqlite3.Connection, stock_ids: list[int]) -> dict[i
     return {int(r[0]): float(r[1]) for r in rows if r[1] is not None}
 
 
+def _portfolio_account_metrics(
+    cash: float,
+    initial_cash: float,
+    holdings_mv: float,
+    journal_rows: list[dict],
+) -> dict[str, float]:
+    """账户累计（含已实现）与当前持仓市值。"""
+    from services.portfolio_analytics import _journal_stats
+
+    total_value = round(float(cash or 0) + float(holdings_mv or 0), 2)
+    initial = float(initial_cash or 0)
+    account_pnl = round(total_value - initial, 2)
+    account_pnl_pct = round(account_pnl / initial * 100, 2) if initial > 0 else 0.0
+    realized_pnl = round(float(_journal_stats(journal_rows).get("realized_pnl") or 0), 2)
+    return {
+        "total_value": total_value,
+        "cash": round(float(cash or 0), 2),
+        "initial_cash": initial,
+        "account_pnl": account_pnl,
+        "account_pnl_pct": account_pnl_pct,
+        "realized_pnl": realized_pnl,
+    }
+
+
 def get_pnl_summary(rt_cache: dict[str, dict] | None = None) -> dict:
     """所有组合的盈亏摘要（累计 / 今日 / 去重持仓 / 交易成本说明）。"""
     if rt_cache is None:
         rt_cache = fetch_rt_cache_for_all_portfolios()
     conn = connect_db(ro=True)
     conn.row_factory = sqlite3.Row
-    portfolios = [dict(r) for r in conn.execute("SELECT id, name FROM portfolios ORDER BY created_at DESC").fetchall()]
+    portfolios = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT id, name, cash, initial_cash FROM portfolios ORDER BY created_at DESC"
+        ).fetchall()
+    ]
     all_positions = conn.execute(
         """SELECT pp.portfolio_id, pp.stock_id, pp.shares, pp.avg_cost, pp.buy_date,
                   s.code, s.name
            FROM portfolio_positions pp JOIN stocks s ON pp.stock_id = s.id"""
     ).fetchall()
+    journal_by_pf: dict[int, list[dict]] = {}
+    for row in conn.execute(
+        "SELECT * FROM trade_journal ORDER BY portfolio_id, trade_date, id"
+    ).fetchall():
+        j = dict(row)
+        journal_by_pf.setdefault(int(j["portfolio_id"]), []).append(j)
     ctx = get_market_context(conn)
     calendar_date = ctx.calendar_date
     trade_date = get_effective_trade_date(ctx)
@@ -489,19 +524,25 @@ def get_pnl_summary(rt_cache: dict[str, dict] | None = None) -> dict:
             buy_date=r["buy_date"] or "",
             price=price,
             prev_close=prev_closes.get(sid),
-            calendar_date=trade_date,
-        )
-        pos["bought_today"] = bool(
-            r["buy_date"] and trade_date and str(r["buy_date"])[:10] == str(trade_date)[:10]
+            calendar_date=calendar_date,
+            trade_date=trade_date,
         )
         by_portfolio.setdefault(pid, []).append(pos)
         flat_for_dedupe.append({**pos, "portfolio_name": pf_names.get(pid, "")})
 
+    friction_pct = estimated_buy_friction_pct()
+
     result = []
     for pf in portfolios:
         positions = by_portfolio.get(pf["id"], [])
-        totals = aggregate_totals(positions)
+        totals = aggregate_totals(positions, friction_pct=friction_pct)
         all_bought_today = bool(positions) and all(p.get("bought_today") for p in positions)
+        account = _portfolio_account_metrics(
+            pf.get("cash") or 0,
+            pf.get("initial_cash") or 0,
+            totals["total_market_value"],
+            journal_by_pf.get(int(pf["id"]), []),
+        )
         result.append({
             "id": pf["id"],
             "name": pf.get("name", ""),
@@ -512,19 +553,20 @@ def get_pnl_summary(rt_cache: dict[str, dict] | None = None) -> dict:
             "total_pnl_pct": totals["total_pnl_pct"],
             "market_pnl_pct": totals["market_pnl_pct"],
             "today_pnl_pct": totals["today_pnl_pct"],
+            "display_pnl_pct": totals["display_pnl_pct"],
+            "is_friction_only": totals["is_friction_only"],
             "all_bought_today": all_bought_today,
             "positions": positions,
+            **account,
         })
 
     deduped = dedupe_positions(
         flat_for_dedupe, prev_closes=prev_closes, calendar_date=calendar_date
     )
-    strategy_totals = aggregate_totals(flat_for_dedupe)
-
-    friction_pct = estimated_buy_friction_pct()
+    strategy_totals = aggregate_totals(flat_for_dedupe, friction_pct=friction_pct)
     return {
         "portfolios": result,
-        "deduped": aggregate_totals(deduped) | {
+        "deduped": aggregate_totals(deduped, friction_pct=friction_pct) | {
             "stock_count": len(deduped),
             "positions": deduped,
         },
@@ -535,8 +577,12 @@ def get_pnl_summary(rt_cache: dict[str, dict] | None = None) -> dict:
         },
         "meta": {
             "calendar_date": calendar_date,
+            "trade_date": trade_date,
             "friction_pct": friction_pct,
-            "friction_note": f"买入成本含滑点+佣金约 {friction_pct:.2f}%，新建仓累计浮盈接近该值属正常",
+            "friction_note": (
+                f"含成本口径因滑点+佣金约上浮 {friction_pct:.2f}%；"
+                "卡片主数字为真实市价涨跌，≈0% 表示股价几乎未动"
+            ),
         },
     }
 
@@ -579,6 +625,8 @@ def get_portfolio(portfolio_id: int, rt_cache: dict[str, dict] | None = None) ->
         return {"error": "组合不存在"}
     pf = dict(pf)
     ctx = get_market_context(conn)
+    calendar_date = ctx.calendar_date
+    trade_date = get_effective_trade_date(ctx)
     code_pairs = [
         (r["code"], r["stock_id"])
         for r in conn.execute(
@@ -599,25 +647,56 @@ def get_portfolio(portfolio_id: int, rt_cache: dict[str, dict] | None = None) ->
             (portfolio_id,),
         ).fetchall()
     ]
+    stock_ids = sorted({int(p["stock_id"]) for p in positions})
+    prev_closes = _fetch_prev_closes(conn, stock_ids)
+    friction_pct = estimated_buy_friction_pct()
     for p in positions:
         sid = p["stock_id"]
         total = int(p["shares"] or 0)
         meta = mark_prices.get(p["code"], {})
-        p["price"] = meta.get("price", 0)
+        price = meta.get("price", 0) or 0
+        p["price"] = price
         p["price_source"] = meta.get("source")
         p["quote_date"] = meta.get("quote_date")
         sellable = _sellable_shares(
             conn, portfolio_id, sid, apply_t1=True,
-            as_of_date=get_effective_trade_date(ctx),
+            as_of_date=trade_date,
         )
-        p["market_value"] = round(total * (p["price"] or 0), 2)
-        p["pnl"] = round(p["market_value"] - total * p["avg_cost"], 2)
-        p["pnl_pct"] = (
-            round(p["pnl"] / (total * p["avg_cost"]) * 100, 2) if p["avg_cost"] > 0 else 0
+        enriched = build_position_pnl(
+            code=p["code"],
+            name=p["name"],
+            stock_id=sid,
+            shares=total,
+            avg_cost=p["avg_cost"] or 0,
+            buy_date=p.get("buy_date") or "",
+            price=price,
+            prev_close=prev_closes.get(sid),
+            calendar_date=calendar_date,
+            trade_date=trade_date,
         )
+        p["market_value"] = enriched["market_value"]
+        p["cost"] = enriched["cost"]
+        p["pnl"] = enriched["pnl"]
+        p["pnl_pct"] = enriched["pnl_pct"]
+        p["market_pnl_pct"] = enriched["market_pnl_pct"]
+        p["today_pnl_pct"] = enriched["today_pnl_pct"]
+        p["display_pnl_pct"] = enriched["display_pnl_pct"]
+        p["is_friction_only"] = enriched["is_friction_only"]
+        p["bought_today"] = enriched["bought_today"]
         p["sellable_shares"] = sellable
         p["t1_locked"] = max(0, total - sellable)
         p["weight_pct"] = 0.0
+
+    journal_all = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT * FROM trade_journal WHERE portfolio_id=? ORDER BY trade_date, id",
+            (portfolio_id,),
+        ).fetchall()
+    ]
+    from services.portfolio_analytics import _journal_stats
+
+    journal_stats = _journal_stats(journal_all)
 
     journal = [
         dict(r)
@@ -639,6 +718,15 @@ def get_portfolio(portfolio_id: int, rt_cache: dict[str, dict] | None = None) ->
     pf["total_value"] = round(pf["cash"] + sum(p["market_value"] for p in positions), 2)
     pf["pnl"] = round(pf["total_value"] - pf["initial_cash"], 2)
     pf["pnl_pct"] = round(pf["pnl"] / pf["initial_cash"] * 100, 2)
+    pf["account_pnl"] = pf["pnl"]
+    pf["account_pnl_pct"] = pf["pnl_pct"]
+    unrealized = aggregate_totals(positions, friction_pct=friction_pct)
+    pf["unrealized_pnl"] = unrealized["total_pnl"]
+    pf["unrealized_pnl_pct"] = unrealized["total_pnl_pct"]
+    pf["market_unrealized_pnl_pct"] = unrealized["market_pnl_pct"]
+    pf["display_unrealized_pnl_pct"] = unrealized["display_pnl_pct"]
+    pf["is_unrealized_friction_only"] = unrealized["is_friction_only"]
+    pf["realized_pnl"] = round(float(journal_stats.get("realized_pnl") or 0), 2)
     if pf["total_value"] > 0:
         for p in positions:
             p["weight_pct"] = round(p["market_value"] / pf["total_value"] * 100, 2)

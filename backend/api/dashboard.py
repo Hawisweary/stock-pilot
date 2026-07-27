@@ -129,6 +129,18 @@ async def ml_top_experimental(
     }
 
 
+# 兼容旧版前端（Tauri WebKit 可能缓存旧 JS 请求 /api/ml/top）
+legacy_ml_router = APIRouter(prefix="/api/ml", tags=["legacy"])
+
+
+@legacy_ml_router.get("/top")
+async def ml_top_legacy(
+    limit: int = Query(10),
+    horizon: int | None = Query(None),
+):
+    return await ml_top_experimental(limit=limit, horizon=horizon)
+
+
 @router.get("/top-stocks")
 async def top_stocks(limit: int = 5):
     """获取 Top N 股票"""

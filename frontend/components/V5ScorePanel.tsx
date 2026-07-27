@@ -15,6 +15,14 @@ interface V5Data {
   veto_status?: string;
   veto_reasons?: string[];
   calc_date?: string;
+  market_regime?: string;
+  market_regime_label?: string;
+  weight_note?: string;
+  regime_guidance?: {
+    regime_label?: string;
+    max_position?: number;
+    note?: string;
+  };
   breakdown?: {
     tiers?: V5Tier;
     tier_sources?: Record<string, string>;
@@ -25,6 +33,14 @@ interface V5Data {
     effective_weights?: Record<string, number>;
     market_beta?: number;
     veto_reasons?: string[];
+    market_regime?: string;
+    market_regime_label?: string;
+    weight_note?: string;
+    regime_guidance?: {
+      regime_label?: string;
+      max_position?: number;
+      note?: string;
+    };
   };
   missing_dims?: string[];
   dims_available?: string;
@@ -210,6 +226,12 @@ export function V5ScorePanel({ stockId }: { stockId: number }) {
   const composite = data.score ?? data.composite_v5;
   const veto = data.veto_status ?? "ok";
   const reasons = data.veto_reasons ?? data.breakdown?.veto_reasons ?? [];
+  const regimeLabel =
+    data.market_regime_label ??
+    data.breakdown?.market_regime_label ??
+    data.regime_guidance?.regime_label;
+  const weightNote = data.weight_note ?? data.breakdown?.weight_note;
+  const regimeGuidance = data.regime_guidance ?? data.breakdown?.regime_guidance;
 
   return (
     <Card>
@@ -245,6 +267,26 @@ export function V5ScorePanel({ stockId }: { stockId: number }) {
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {(regimeLabel || weightNote) && (
+          <div className="rounded-md border border-primary/15 bg-primary/5 px-2.5 py-2 text-[11px] leading-relaxed">
+            {regimeLabel && (
+              <div className="font-medium text-primary">
+                当日市场：{regimeLabel}
+                {regimeGuidance?.max_position != null && (
+                  <span className="font-normal text-muted-foreground ml-2">
+                    建议仓位 ≤ {Math.round(regimeGuidance.max_position * 100)}%
+                  </span>
+                )}
+              </div>
+            )}
+            {weightNote && (
+              <div className="text-muted-foreground mt-0.5">V5 权重调整：{weightNote}</div>
+            )}
+            {regimeGuidance?.note && (
+              <div className="text-muted-foreground mt-0.5">{regimeGuidance.note}</div>
+            )}
+          </div>
+        )}
         {/* U3-6: 规则引擎解释 */}
         <V5ScoreExplainer tiers={tiers} composite={composite ?? null} vetoReasons={reasons} />
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2">

@@ -17,6 +17,7 @@ import { DataHealthCard } from "@/components/DataHealthCard";
 import { ScoreAlertCard } from "@/components/ScoreAlertCard";
 import { UpcomingEarningsCard } from "@/components/UpcomingEarningsCard";
 import { PortfolioPnlCard } from "@/components/PortfolioPnlCard";
+import { MarketRegimeCard } from "@/components/MarketRegimeCard";
 import { exportCsv } from "@/lib/csvExport";
 import { scoreTextClass } from "@/lib/scoreColors";
 import { useToast } from "@/lib/useToast";
@@ -80,38 +81,47 @@ export default function DashboardPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [data, mlRes, v5Batch, qRes, mRes, revRes, hotRes, thsRes] = await Promise.all([
-        api.dashboardOverview(),
-        api.mlTop(8),
-        api.getV5ScoresBatch({ scope: v5Scope }),
-        fetch("/api/fusion/quality").then(r => r.json()),
-        fetch("/api/macro/score").then(r => r.json()),
-        fetch("/api/review/latest").then(r => r.json()),
-        fetch("/api/hotspots").then(r => r.json()),
-        fetch("/api/signals/hotspots").then(r => r.json()),
-      ]);
+      const data = await api.dashboardOverview();
       setOverview(data);
-      setMlTop(mlRes.enabled ? (mlRes.predictions || []) : []);
-      setQuality(qRes);
-      setMacro(mRes);
-      setReview(revRes?.review || null);
-      setHotspots(hotRes);
-      setThsHot(thsRes?.hotspots || []);
-      const scores = v5Batch.scores || [];
-      setV5Rank(scores);
-      setV5CalcDate(v5Batch.calc_date ?? null);
-      setV5ScopeLabel(v5Batch.scope_label ?? V5_MARKET_SCOPES.find((s) => s.id === v5Scope)?.label ?? v5Scope);
-      lastV5TsRef.current = getV5RecalcTimestamp();
-      // U1-3: 1次 bulk XHR 拉取 sparkline（禁止 N+1）
-      if (scores.length > 0) {
-        postSparkline(scores.map((s) => s.stock_id), 30)
-          .then(setSparklines)
-          .catch(() => {});
-      }
     } catch (e) {
-      console.error(e);
+      console.error("dashboard overview failed", e);
+      setLoading(false);
+      return;
     }
+    // overview 就绪即展示页面，次要数据后台加载（避免阻塞卡片挂载）
     setLoading(false);
+
+    void (async () => {
+      try {
+        const [mlRes, v5Batch, qRes, mRes, revRes, hotRes, thsRes] = await Promise.all([
+          api.mlTop(8).catch(() => ({ enabled: false, predictions: [] as { code: string; name: string; score: number }[] })),
+          api.getV5ScoresBatch({ scope: v5Scope }).catch(() => ({ scores: [] as import("@/lib/api").V5ScoreRow[], calc_date: null as string | null, scope_label: "" })),
+          fetch("/api/fusion/quality").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+          fetch("/api/macro/score").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+          fetch("/api/review/latest").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+          fetch("/api/hotspots").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+          fetch("/api/signals/hotspots").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        ]);
+        setMlTop(mlRes.enabled ? (mlRes.predictions || []) : []);
+        if (qRes) setQuality(qRes);
+        if (mRes) setMacro(mRes);
+        setReview(revRes?.review || null);
+        if (hotRes) setHotspots(hotRes);
+        setThsHot(thsRes?.hotspots || []);
+        const scores = v5Batch.scores || [];
+        setV5Rank(scores);
+        setV5CalcDate(v5Batch.calc_date ?? null);
+        setV5ScopeLabel(v5Batch.scope_label ?? V5_MARKET_SCOPES.find((s) => s.id === v5Scope)?.label ?? v5Scope);
+        lastV5TsRef.current = getV5RecalcTimestamp();
+        if (scores.length > 0) {
+          postSparkline(scores.map((s) => s.stock_id), 30)
+            .then(setSparklines)
+            .catch(() => {});
+        }
+      } catch (e) {
+        console.error("dashboard secondary load failed", e);
+      }
+    })();
   }, [v5Scope]);
 
   useEffect(() => {
@@ -269,6 +279,9 @@ export default function DashboardPage() {
         <UpcomingEarningsCard />
         <PortfolioPnlCard />
       </div>
+
+      {/* 市场状态（独立一行，不挤占原有三卡布局） */}
+      <MarketRegimeCard compact />
 
       {/* U2-3: 数据健康看板 */}
       <DataHealthCard

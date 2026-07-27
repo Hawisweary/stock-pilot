@@ -412,11 +412,42 @@ export default function PortfolioPage() {
                   )}
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center text-xs">
                     <div className="bg-muted rounded p-2"><div className="font-bold font-mono tabular-nums">¥{Number(selected.total_value).toLocaleString()}</div>总资产</div>
                     <div className="bg-muted rounded p-2"><div className="font-bold font-mono tabular-nums">¥{Number(selected.cash).toLocaleString()}</div>现金</div>
-                    <div className="bg-muted rounded p-2"><div className={`font-bold font-mono tabular-nums ${Number(selected.pnl) >= 0 ? "text-up" : "text-down"}`}>{selected.pnl_pct}%</div>盈亏</div>
+                    <div className="bg-muted rounded p-2">
+                      <div className={`font-bold font-mono tabular-nums ${Number(selected.account_pnl ?? selected.pnl) >= 0 ? "text-up" : "text-down"}`}>
+                        {fmtPct(selected.account_pnl_pct ?? selected.pnl_pct)}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">账户累计</div>
+                      {selected.realized_pnl != null && (
+                        <div className="text-[9px] text-muted-foreground mt-0.5">
+                          已实现 ¥{Number(selected.realized_pnl).toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                    <div className="bg-muted rounded p-2">
+                      <div className={`font-bold font-mono tabular-nums ${holdingsPnlColor(selected)}`}>
+                        {fmtPct(
+                          selected.display_unrealized_pnl_pct ?? selected.market_unrealized_pnl_pct ?? selected.unrealized_pnl_pct,
+                          selected.is_unrealized_friction_only,
+                        )}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">持仓浮盈</div>
+                      {selected.unrealized_pnl_pct != null && !selected.is_unrealized_friction_only && (
+                        <div className="text-[9px] text-muted-foreground mt-0.5">
+                          含成本 {fmtPct(selected.unrealized_pnl_pct)}
+                        </div>
+                      )}
+                    </div>
                   </div>
+                  {(selected.account_pnl_pct ?? selected.pnl_pct) < -1 &&
+                    Math.abs(selected.display_unrealized_pnl_pct ?? selected.market_unrealized_pnl_pct ?? 0) < 1 && (
+                    <p className="text-[10px] text-muted-foreground text-center leading-relaxed">
+                      账户累计亏损主要来自历史已平仓交易（已实现 ¥{Number(selected.realized_pnl ?? 0).toLocaleString()}），
+                      当前 {selected.positions.length} 只持仓几乎持平。
+                    </p>
+                  )}
                   {navSeries && navSeries.dates.length > 1 && (
                     <BetaDualChart
                       title="净值走势（归一化 100）"
@@ -556,7 +587,7 @@ export default function PortfolioPage() {
                       <thead><tr className="text-muted-foreground border-b">
                         <th className="text-left py-1">代码 / 名称</th><th>持仓</th><th>现价</th><th>成本</th>
                         {showTurtleTools && <th>止损</th>}
-                        <th>权重</th><th>盈亏</th><th></th>
+                        <th>权重</th><th>浮盈</th><th></th>
                       </tr></thead>
                       <tbody>
                         {positions.map((p) => (
@@ -801,6 +832,29 @@ export default function PortfolioPage() {
   );
 }
 
+function fmtPct(v: number | undefined | null, frictionOnly?: boolean) {
+  if (v == null || Number.isNaN(v)) return "—";
+  if (frictionOnly || Math.abs(v) < 0.01) return "≈0%";
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+
+function holdingsPnlColor(pf: PortfolioDetail) {
+  if (pf.is_unrealized_friction_only) return "text-muted-foreground";
+  const v = pf.display_unrealized_pnl_pct ?? pf.market_unrealized_pnl_pct ?? pf.unrealized_pnl_pct ?? 0;
+  if (Math.abs(v) < 0.01) return "text-muted-foreground";
+  return v >= 0 ? "text-up" : "text-down";
+}
+
+function positionMainPct(p: PortfolioPosition) {
+  if (p.is_friction_only) return 0;
+  return p.display_pnl_pct ?? p.market_pnl_pct ?? p.pnl_pct;
+}
+
+function positionPnlColor(p: PortfolioPosition) {
+  if (p.is_friction_only || Math.abs(positionMainPct(p)) < 0.01) return "text-muted-foreground";
+  return positionMainPct(p) >= 0 ? "text-up" : "text-down";
+}
+
 function Stat({ label, value, positive }: { label: string; value: string; positive?: boolean }) {
   return (
     <div className="bg-muted rounded p-2">
@@ -962,7 +1016,12 @@ function PositionRow({ p, showStop, onSell }: { p: PortfolioPosition; showStop?:
         </td>
       )}
       <td className="text-center font-mono tabular-nums">{p.weight_pct}%</td>
-      <td className={`text-center font-mono tabular-nums ${Number(p.pnl) >= 0 ? "text-up" : "text-down"}`}>{p.pnl_pct}%</td>
+      <td className={`text-center font-mono tabular-nums ${positionPnlColor(p)}`} title={p.is_friction_only ? "市价几乎未动，微亏来自买入成本" : undefined}>
+        {fmtPct(positionMainPct(p), p.is_friction_only)}
+        {!p.is_friction_only && Math.abs((p.pnl_pct ?? 0) - positionMainPct(p)) >= 0.05 && (
+          <div className="text-[9px] text-muted-foreground">含成本 {fmtPct(p.pnl_pct)}</div>
+        )}
+      </td>
       <td className="text-right">{p.sellable_shares >= 100 && <button onClick={onSell} className="text-[10px] text-down underline">卖</button>}</td>
     </tr>
   );

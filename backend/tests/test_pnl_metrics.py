@@ -2,7 +2,9 @@ from services.pnl_metrics import (
     aggregate_totals,
     build_position_pnl,
     dedupe_positions,
+    display_pnl_pct,
     estimated_buy_friction_pct,
+    is_friction_only,
     raw_entry_from_avg_cost,
 )
 
@@ -28,11 +30,37 @@ def test_build_position_pnl_bought_today():
         buy_date="2026-07-24",
         price=57.0,
         prev_close=56.5,
-        calendar_date="2026-07-24",
+        calendar_date="2026-07-26",
+        trade_date="2026-07-24",
     )
     assert pos["pnl_pct"] == -0.13
     assert pos["market_pnl_pct"] == 0.0
+    assert pos["is_friction_only"] is True
+    assert pos["display_pnl_pct"] == 0.0
+    assert pos["bought_today"] is False
+
+
+def test_bought_today_requires_calendar_date():
+    pos = build_position_pnl(
+        code="600519",
+        name="茅台",
+        stock_id=1,
+        shares=100,
+        avg_cost=57.074,
+        buy_date="2026-07-26",
+        price=57.0,
+        prev_close=56.5,
+        calendar_date="2026-07-26",
+        trade_date="2026-07-24",
+    )
     assert pos["bought_today"] is True
+
+
+def test_is_friction_only_detects_cost_bias():
+    assert is_friction_only(-0.13, 0.0) is True
+    assert is_friction_only(-11.74, -11.63) is False
+    assert display_pnl_pct(-0.13, 0.0) == 0.0
+    assert display_pnl_pct(-11.74, -11.63) == -11.63
 
 
 def test_dedupe_merges_same_stock():

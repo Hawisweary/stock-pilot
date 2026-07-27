@@ -2,6 +2,7 @@
 
 Phase A：指数 K 线 + 全市场广度（涨跌家数、成交额、行业轮动、相关性）。
 Phase B：两层规则分类，输出 regime + regime_label，供 V5 动态权重与前端展示。
+Phase C：仓位/风控建议 + V5 权重影响说明，供 Dashboard 与个股页展示。
 """
 from __future__ import annotations
 
@@ -33,11 +34,104 @@ REGIME_LABELS: dict[str, str] = {
     "liquidity_drought": "流动性枯竭",
 }
 
+REGIME_DIM_LABELS: dict[str, str] = {
+    "fundamental": "基本面",
+    "quality": "质量",
+    "industry": "行业",
+    "capital": "资金",
+    "valuation": "估值",
+    "technical": "技术",
+    "market_env": "大盘",
+    "policy": "政策",
+    "news": "新闻",
+    "mood": "情绪",
+}
+
+REGIME_GUIDANCE: dict[str, dict[str, Any]] = {
+    "strong_trend_up": {
+        "max_position": 0.90,
+        "stop_width_mult": 1.0,
+        "note": "趋势友好，可正常仓位",
+    },
+    "weak_trend_up": {
+        "max_position": 0.85,
+        "stop_width_mult": 1.0,
+        "note": "温和上涨，可维持偏高仓位",
+    },
+    "strong_trend_down": {
+        "max_position": 0.50,
+        "stop_width_mult": 1.2,
+        "note": "偏空，降仓、放宽止损",
+    },
+    "weak_trend_down": {
+        "max_position": 0.60,
+        "stop_width_mult": 1.1,
+        "note": "弱势，适度降仓",
+    },
+    "oscillation": {
+        "max_position": 0.70,
+        "stop_width_mult": 0.9,
+        "note": "震荡，控制仓位、缩短持股",
+    },
+    "high_volatility": {
+        "max_position": 0.40,
+        "stop_width_mult": 1.5,
+        "note": "高波动，轻仓、宽止损",
+    },
+    "liquidity_drought": {
+        "max_position": 0.30,
+        "stop_width_mult": 1.0,
+        "note": "流动性差，少交易",
+    },
+}
+
 CORR_SAMPLE_SIZE = 120
 
 
 def regime_label(regime: str) -> str:
     return REGIME_LABELS.get(regime, regime)
+
+
+def get_regime_guidance(regime: str) -> dict[str, Any]:
+    """Phase C：仓位与止损建议。"""
+    base = REGIME_GUIDANCE.get(regime) or REGIME_GUIDANCE["oscillation"]
+    return {
+        "regime": regime,
+        "regime_label": regime_label(regime),
+        "max_position": base["max_position"],
+        "stop_width_mult": base["stop_width_mult"],
+        "note": base["note"],
+    }
+
+
+def describe_regime_weight_deltas(regime: str) -> str:
+    """Phase C：V5 动态权重调整的一句话说明。"""
+    deltas = config.V5_REGIME_WEIGHT_DELTAS.get(regime, {})
+    if not deltas:
+        return "权重保持基线，无额外调整"
+    up = sorted(
+        ((REGIME_DIM_LABELS.get(k, k), v) for k, v in deltas.items() if v > 0),
+        key=lambda x: -x[1],
+    )
+    down = sorted(
+        ((REGIME_DIM_LABELS.get(k, k), v) for k, v in deltas.items() if v < 0),
+        key=lambda x: x[1],
+    )
+    parts: list[str] = []
+    if up:
+        parts.append("加重" + "、".join(label for label, _ in up))
+    if down:
+        parts.append("减轻" + "、".join(label for label, _ in down))
+    return "，".join(parts)
+
+
+def enrich_regime_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """为 API 响应附加 guidance 与 V5 权重说明。"""
+    regime = str(payload.get("regime") or "oscillation")
+    payload.setdefault("regime_label", regime_label(regime))
+    payload["guidance"] = get_regime_guidance(regime)
+    payload["weight_note"] = describe_regime_weight_deltas(regime)
+    return payload
 
 
 def _is_valid(v: Any) -> bool:
@@ -516,7 +610,7 @@ def detect_regime(
     result = classify_regime(kline, features=features)
     result["trade_date"] = last_date
     result["index_code"] = index_code
-    return result
+    return enrich_regime_payload(result)
 
 
 def get_regime_for_date(
@@ -533,7 +627,7 @@ def get_regime_for_date(
             "SELECT * FROM market_regime_daily WHERE trade_date=? LIMIT 1", (trade_date,)
         ).fetchone()
     if not row:
-        return {"regime": "oscillation", "regime_label": regime_label("oscillation")}
+        return enrich_regime_payload({"regime": "oscillation", "regime_label": regime_label("oscillation")})
     if hasattr(row, "keys"):
         out = dict(row)
     else:
@@ -541,7 +635,7 @@ def get_regime_for_date(
         out = dict(zip(cols, row))
     if not out.get("regime_label"):
         out["regime_label"] = regime_label(str(out.get("regime", "oscillation")))
-    return out
+    return enrich_regime_payload(out)
 
 
 def sync_regime(
@@ -587,4 +681,4 @@ def sync_regime(
         ),
     )
     conn.commit()
-    return result
+    return enrich_regime_payload(result)

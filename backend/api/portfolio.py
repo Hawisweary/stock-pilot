@@ -113,6 +113,8 @@ async def pnl_summary():
             "total_pnl_pct": deduped.get("total_pnl_pct", 0),
             "market_pnl_pct": deduped.get("market_pnl_pct", 0),
             "today_pnl_pct": deduped.get("today_pnl_pct", 0),
+            "display_pnl_pct": deduped.get("display_pnl_pct", 0),
+            "is_friction_only": deduped.get("is_friction_only", False),
             "stock_count": deduped.get("stock_count", 0),
             "position_count": deduped.get("position_count", 0),
         },

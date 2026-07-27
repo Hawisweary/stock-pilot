@@ -28,6 +28,26 @@ def pct_change(mark: float, basis: float) -> float:
     return round((mark - basis) / basis * 100, 2)
 
 
+def is_friction_only(
+    cumulative_pct: float,
+    market_pct: float,
+    *,
+    friction_pct: float | None = None,
+    market_tol: float = 0.08,
+    cum_tol: float = 0.08,
+) -> bool:
+    """累计微亏但市价几乎未动 → 视为交易成本偏差，非真实下跌。"""
+    fp = friction_pct if friction_pct is not None else estimated_buy_friction_pct()
+    return abs(market_pct) <= market_tol and abs(cumulative_pct + fp) <= cum_tol
+
+
+def display_pnl_pct(cumulative_pct: float, market_pct: float) -> float:
+    """卡片主展示：优先真实市价涨跌。"""
+    if is_friction_only(cumulative_pct, market_pct):
+        return 0.0
+    return market_pct if abs(market_pct) >= 0.01 else cumulative_pct
+
+
 def weighted_pct(positions: list[dict], pct_key: str, weight_key: str = "cost") -> float:
     total_w = sum(float(p.get(weight_key) or 0) for p in positions)
     if total_w <= 0:
@@ -36,13 +56,15 @@ def weighted_pct(positions: list[dict], pct_key: str, weight_key: str = "cost") 
     return round(acc / total_w, 2)
 
 
-def aggregate_totals(positions: list[dict]) -> dict:
+def aggregate_totals(positions: list[dict], *, friction_pct: float | None = None) -> dict:
     total_cost = sum(float(p.get("cost") or 0) for p in positions)
     total_mv = sum(float(p.get("market_value") or 0) for p in positions)
     total_pnl = round(total_mv - total_cost, 2)
     total_pnl_pct = pct_change(total_mv, total_cost) if total_cost > 0 else 0.0
     market_pnl_pct = weighted_pct(positions, "market_pnl_pct")
     today_pnl_pct = weighted_pct(positions, "today_pnl_pct")
+    fp = friction_pct if friction_pct is not None else estimated_buy_friction_pct()
+    friction_only = is_friction_only(total_pnl_pct, market_pnl_pct, friction_pct=fp)
     return {
         "total_cost": round(total_cost, 2),
         "total_market_value": round(total_mv, 2),
@@ -50,6 +72,8 @@ def aggregate_totals(positions: list[dict]) -> dict:
         "total_pnl_pct": total_pnl_pct,
         "market_pnl_pct": market_pnl_pct,
         "today_pnl_pct": today_pnl_pct,
+        "display_pnl_pct": display_pnl_pct(total_pnl_pct, market_pnl_pct),
+        "is_friction_only": friction_only,
         "position_count": len(positions),
     }
 
@@ -65,6 +89,7 @@ def build_position_pnl(
     price: float,
     prev_close: float | None,
     calendar_date: str,
+    trade_date: str = "",
 ) -> dict:
     shares = int(shares or 0)
     avg_cost = float(avg_cost or 0)
@@ -79,10 +104,12 @@ def build_position_pnl(
 
     if prev_close and prev_close > 0:
         today_pnl_pct = pct_change(price, prev_close)
-    elif buy_date and calendar_date and buy_date[:10] == calendar_date[:10]:
+    elif buy_date and trade_date and buy_date[:10] == trade_date[:10]:
         today_pnl_pct = pct_change(price, raw_entry)
     else:
         today_pnl_pct = 0.0
+
+    friction_only = is_friction_only(pnl_pct, market_pnl_pct)
 
     return {
         "stock_id": stock_id,
@@ -99,7 +126,11 @@ def build_position_pnl(
         "pnl_pct": pnl_pct,
         "market_pnl_pct": market_pnl_pct,
         "today_pnl_pct": today_pnl_pct,
-        "bought_today": bool(buy_date and calendar_date and buy_date[:10] == calendar_date[:10]),
+        "display_pnl_pct": display_pnl_pct(pnl_pct, market_pnl_pct),
+        "is_friction_only": friction_only,
+        "bought_today": bool(
+            buy_date and calendar_date and buy_date[:10] == calendar_date[:10]
+        ),
     }
 
 

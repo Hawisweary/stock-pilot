@@ -10,6 +10,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.market_regime import (
     classify_regime,
     compute_market_features,
+    describe_regime_weight_deltas,
+    get_regime_guidance,
     regime_label,
 )
 
@@ -76,6 +78,20 @@ def test_classify_liquidity_drought_with_features():
 def test_regime_label_mapping():
     assert regime_label("weak_trend_up") == "趋势上涨"
     assert regime_label("oscillation") == "震荡"
+
+
+def test_regime_guidance():
+    g = get_regime_guidance("high_volatility")
+    assert g["max_position"] == 0.40
+    assert g["regime_label"] == "高波动"
+    assert "波动" in g["note"]
+
+
+def test_describe_weight_deltas():
+    note = describe_regime_weight_deltas("strong_trend_down")
+    assert "质量" in note
+    assert "估值" in note
+    assert describe_regime_weight_deltas("oscillation") == "权重保持基线，无额外调整"
 
 
 def _make_quotes_db() -> sqlite3.Connection:
