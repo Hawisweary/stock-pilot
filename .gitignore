@@ -13,6 +13,9 @@ build/
 
 # SQLite 数据库与数据目录（1.4GB DB + 5GB 备份）
 data/
+# 例外:frontend 的 /data 与 /data-quality 是源码路由,不是上面的数据目录
+!frontend/app/data/
+!frontend/app/data-quality/
 *.db
 *.db-journal
 *.db-wal
