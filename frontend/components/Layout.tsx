@@ -13,6 +13,8 @@ type NavItem = {
   icon: typeof LayoutDashboard;
   beta?: boolean;
   flag?: keyof FeatureFlags;
+  /** 额外的激活路径前缀(用于把多个路由归到一个侧栏入口) */
+  match?: string[];
 };
 
 type FeatureFlags = {
@@ -22,19 +24,33 @@ type FeatureFlags = {
   factor_ic: boolean;
 };
 
-const ALL_NAV: NavItem[] = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/market", label: "市场行情", icon: Activity },
-  { href: "/stocks", label: "股票列表", icon: TrendingUp },
-  { href: "/screener", label: "选股筛选", icon: Filter },
-  { href: "/calendar", label: "财报日历", icon: CalendarDays },
-  { href: "/backtest", label: "回测系统", icon: BarChart3, beta: true, flag: "backtest" },
-  { href: "/portfolio", label: "模拟交易", icon: Briefcase, beta: true, flag: "portfolio" },
-  { href: "/heatmap", label: "V5 热力图", icon: Grid3X3 },
-  { href: "/factors", label: "因子实验室", icon: FlaskConical, beta: true, flag: "factor_lab" },
-  // /ic 重定向至 /factors?tab=ic
-  { href: "/data", label: "数据管理", icon: Database },
-  { href: "/data-quality", label: "质量看板", icon: ShieldCheck },
+// 分组导航:研究主线 / 实验(3个Beta收成1个入口,进去用顶部tab切) / 系统(数据管理+质量看板合一)
+const NAV_GROUPS: { title?: string; items: NavItem[] }[] = [
+  {
+    items: [
+      { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/market", label: "市场行情", icon: Activity },
+      { href: "/stocks", label: "股票列表", icon: TrendingUp },
+      { href: "/screener", label: "选股筛选", icon: Filter },
+      { href: "/calendar", label: "财报日历", icon: CalendarDays },
+      { href: "/heatmap", label: "V5 热力图", icon: Grid3X3 },
+    ],
+  },
+  {
+    title: "实验",
+    items: [
+      // 回测/模拟交易/因子实验室 → 一个入口,页面内 BetaTabs 互切
+      { href: "/backtest", label: "实验模块", icon: FlaskConical, beta: true, flag: "backtest",
+        match: ["/portfolio", "/factors", "/ic", "/qlib"] },
+    ],
+  },
+  {
+    title: "系统",
+    items: [
+      // 数据管理 + 质量看板 → 一个入口,页面内 DataTabs 互切
+      { href: "/data", label: "数据中心", icon: Database, match: ["/data-quality"] },
+    ],
+  },
 ];
 
 const DEFAULT_FLAGS: FeatureFlags = {
@@ -71,7 +87,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
       });
   }, []);
 
-  const navItems = ALL_NAV.filter((item) => !item.flag || flags[item.flag]);
+  const navGroups = NAV_GROUPS
+    .map((g) => ({ ...g, items: g.items.filter((item) => !item.flag || flags[item.flag]) }))
+    .filter((g) => g.items.length > 0);
+
+  const hit = (base: string) => pathname === base || pathname.startsWith(base + "/");
+  const isActiveItem = (item: NavItem) =>
+    (item.href === "/" ? pathname === "/" : hit(item.href)) ||
+    (item.match ?? []).some((m) => hit(m));
 
   useEffect(() => { setDrawerOpen(false); }, [pathname]);
 
@@ -98,31 +121,39 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <X className="h-4 w-4" />
         </button>
       </div>
-      <nav className="space-y-1 p-4">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = pathname === item.href ||
-            (item.href !== "/" && pathname.startsWith(item.href));
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
-                isActive
-                  ? "bg-primary/10 text-primary font-medium"
-                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              <span className="flex-1">{item.label}</span>
-              {item.beta && (
-                <span className="text-[9px] uppercase tracking-wide text-amber-600/90 font-semibold">
-                  Beta
-                </span>
-              )}
-            </Link>
-          );
-        })}
+      <nav className="p-4 space-y-4">
+        {navGroups.map((group, gi) => (
+          <div key={gi} className="space-y-1">
+            {group.title && (
+              <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                {group.title}
+              </div>
+            )}
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              const isActive = isActiveItem(item);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                    isActive
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="flex-1">{item.label}</span>
+                  {item.beta && (
+                    <span className="text-[9px] uppercase tracking-wide text-amber-600/90 font-semibold">
+                      Beta
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
       <div className="absolute bottom-4 left-4 right-4">
         <button
