@@ -176,6 +176,28 @@ async def lifespan(app: FastAPI):
     # 状态持久化+错过补跑+重任务子进程化）
     from services.scheduler import start_scheduler
     start_scheduler(app)
+
+    # 启动即补跑过期的待执行建仓/调仓:后端常上下线,9:35 那一下可能没活着,
+    # 导致 pending 单永远卡住(建仓点了没反应)。后台线程延迟执行,避开启动期写竞争。
+    def _catchup_pending():
+        import time as _t
+        from services.portfolio_svc import execute_pending_orders_at_open
+        # 先睡 90s 让启动期 warm_cache 等批任务跑完释放 DB 写锁,再补跑;
+        # 仍锁则少量退避重试(execute 内部已保证异常不泄漏连接)。
+        _t.sleep(90)
+        for attempt in range(4):
+            try:
+                r = execute_pending_orders_at_open()  # 有过期单则自动绕过守卫补跑
+                if r.get("executed"):
+                    print(f"[App] 启动补跑待办: 执行 {r['executed']} 单 (调仓 {r.get('rebalances', 0)})")
+                return
+            except Exception as e:
+                if "locked" in str(e).lower() and attempt < 3:
+                    _t.sleep(120)
+                    continue
+                print(f"[App] 启动补跑待办跳过: {e}")
+                return
+    threading.Thread(target=_catchup_pending, daemon=True).start()
     # 旧版 fetch-recalc 循环已下线：18:00 逐股抓取(eastmoney已封、每股1.5s约2.2小时)
     # 与周一重算均被 15:30 每日流水线覆盖
     _scheduler_state["note"] = "legacy loop disabled; see services/scheduler.py"
