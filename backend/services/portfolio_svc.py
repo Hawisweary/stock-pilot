@@ -6,7 +6,7 @@ from db_util import connect_db
 from datetime import date
 from typing import List, Optional
 
-from config import DB_PATH
+from config import DB_PATH, DUAL_MA_MIN_HOLD_DAYS
 from services.trade_pricing import (
     get_effective_trade_date,
     get_market_context,
@@ -24,7 +24,11 @@ from services.trading_rules import (
     validate_shares,
 )
 from services.strategy_registry import get_meta, is_valid_strategy, normalize_strategy_id
-from services.strategy_selector import select_sector_rebalance, select_top_n_dicts
+from services.strategy_selector import (
+    momentum_crash_reason,
+    select_sector_rebalance,
+    select_top_n_dicts,
+)
 from services.pnl_metrics import (
     aggregate_totals,
     build_position_pnl,
@@ -74,6 +78,36 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
 
     _migrate_positions_to_lots(conn)
     _ensure_portfolio_settings_cols(conn)
+    _ensure_pending_orders_table(conn)
+
+
+def _ensure_pending_orders_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_pending_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            signal_date TEXT NOT NULL,
+            execute_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            code TEXT,
+            shares INTEGER,
+            reason TEXT,
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            executed_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_portfolio_pending_exec
+        ON portfolio_pending_orders(status, execute_date)
+    """)
+
+
+def _exec_date_after_signal(signal: date | None = None) -> str:
+    from services.trade_calendar import next_trading_day
+
+    base = signal or date.today()
+    return next_trading_day(base).isoformat()
 
 
 def _ensure_portfolio_settings_cols(conn: sqlite3.Connection) -> None:
@@ -759,6 +793,8 @@ def trade(
     skip_risk: bool = False,
     reason: str | None = None,
     _conn: Optional[sqlite3.Connection] = None,
+    price_mode: str = "auto",
+    as_of_trade_date: str | None = None,
 ) -> dict:
     external = _conn is not None
     conn = _conn or connect_db(write=True)
@@ -797,7 +833,11 @@ def trade(
         return {"error": "股票不在跟踪列表"}
     sid = stock["id"]
     ctx = get_market_context(conn)
-    tq = resolve_trade_price(code, sid, action, conn, ctx=ctx)
+    tq = resolve_trade_price(
+        code, sid, action, conn, ctx=ctx,
+        price_mode=price_mode,  # type: ignore[arg-type]
+        as_of_trade_date=as_of_trade_date,
+    )
     if tq.error:
         _close(conn, external)
         return {"error": tq.error}
@@ -898,6 +938,31 @@ def trade(
     }
 
 
+def _rebalance_quote_price(
+    conn: sqlite3.Connection,
+    code: str,
+    price_col: str,
+    prefer_date: str | None = None,
+) -> float | None:
+    if prefer_date:
+        row = conn.execute(
+            f"""SELECT q.{price_col} FROM stock_daily_quotes q
+                JOIN stocks s ON q.stock_id=s.id
+                WHERE s.code=? AND q.trade_date=? AND q.{price_col} IS NOT NULL""",
+            (code, prefer_date),
+        ).fetchone()
+        if row and row[0] is not None:
+            return float(row[0])
+    row = conn.execute(
+        f"""SELECT q.{price_col} FROM stock_daily_quotes q JOIN stocks s ON q.stock_id=s.id
+           WHERE s.code=? AND q.{price_col} IS NOT NULL ORDER BY q.trade_date DESC LIMIT 1""",
+        (code,),
+    ).fetchone()
+    if not row or row[0] is None:
+        return None
+    return float(row[0])
+
+
 def build_from_top_n(
     portfolio_id: int,
     top_n: int = 5,
@@ -908,6 +973,8 @@ def build_from_top_n(
     lookback: int = 20,
     sector_window: int = 5,
     per_sector: int = 2,
+    price_mode: str = "auto",
+    as_of_trade_date: str | None = None,
 ) -> dict:
     strategy = normalize_strategy_id(strategy)
     if not is_valid_strategy(strategy, combination_id=combination_id):
@@ -958,71 +1025,165 @@ def build_from_top_n(
     _ensure_tables(trade_conn)
 
     sold: list[dict] = []
+    trimmed: list[dict] = []
     bought: list = []
     skipped: list = []
     skipped_sell_t1: list[dict] = []  # 因 T+1 跳过的卖出
 
-    today = get_effective_trade_date(get_market_context(trade_conn))
+    today = as_of_trade_date or get_effective_trade_date(get_market_context(trade_conn))
+    price_col = "open" if price_mode == "open" else "close"
+    settings = _portfolio_settings(pf)
+    max_w = settings.get("max_weight_pct", 30) / 100.0
+    total_score = sum(float(r["score"]) for r in rows)
+    if pos_style == "weighted" and total_score > 0:
+        weights = {r["code"]: float(r["score"]) / total_score for r in rows}
+    else:
+        weights = {r["code"]: 1.0 / len(rows) for r in rows}
+    for code in list(weights.keys()):
+        weights[code] = min(weights[code], max_w)
+
+    def _t1_blocked(sid: int) -> bool:
+        return bool(
+            trade_conn.execute(
+                "SELECT 1 FROM portfolio_lots WHERE portfolio_id=? AND stock_id=? AND buy_date=? LIMIT 1",
+                (portfolio_id, sid, today),
+            ).fetchone()
+        )
+
+    def _dual_ma_hold_blocked(sid: int) -> bool:
+        if strategy != "dual_ma":
+            return False
+        lot = trade_conn.execute(
+            """SELECT MIN(buy_date) FROM portfolio_lots
+               WHERE portfolio_id=? AND stock_id=? AND shares > 0""",
+            (portfolio_id, sid),
+        ).fetchone()
+        if not lot or not lot[0]:
+            return False
+        try:
+            return _count_trading_days(str(lot[0])[:10], today) < DUAL_MA_MIN_HOLD_DAYS
+        except Exception:
+            return False
+
     try:
         with trade_conn:  # all-or-nothing：任一步失败自动 ROLLBACK
             old_positions = trade_conn.execute(
                 """SELECT s.code, pp.stock_id, pp.shares FROM portfolio_positions pp
                    JOIN stocks s ON pp.stock_id = s.id
-                   WHERE pp.portfolio_id=?""",
+                   WHERE pp.portfolio_id=? AND pp.shares > 0""",
                 (portfolio_id,),
             ).fetchall()
+
+            # ① 掉出目标名单 → 清仓
             for row in old_positions:
                 code = row["code"]
                 sid = row["stock_id"]
-                if strategy == "sector_rotation" and code in target_codes:
+                if code in target_codes:
                     continue
-                # T+1：跳过当日有买入 lot 的标的（A 股规则：当日买入不可当日卖出）
-                same_day_lot = trade_conn.execute(
-                    "SELECT 1 FROM portfolio_lots WHERE portfolio_id=? AND stock_id=? AND buy_date=? LIMIT 1",
-                    (portfolio_id, sid, today),
-                ).fetchone()
-                if same_day_lot:
+                if _t1_blocked(sid):
                     skipped_sell_t1.append({"code": code, "reason": "t1_same_day_buy", "sellable": 0})
                     continue
-                res = trade(portfolio_id, code, "sell", row["shares"], apply_t1=True, _conn=trade_conn)
+                if _dual_ma_hold_blocked(sid):
+                    skipped.append({"code": code, "reason": "dual_ma_min_hold"})
+                    continue
+                res = trade(
+                    portfolio_id, code, "sell", int(row["shares"]),
+                    apply_t1=True, _conn=trade_conn,
+                    price_mode=price_mode, as_of_trade_date=as_of_trade_date,
+                    reason="rebalance_exit",
+                )
                 if "error" not in res:
-                    sold.append({"code": code, "shares": row["shares"]})
+                    sold.append({"code": code, "shares": row["shares"], "reason": "rebalance_exit"})
 
-            pf_cash = trade_conn.execute("SELECT cash FROM portfolios WHERE id=?", (portfolio_id,)).fetchone()
-            cash_pool = pf_cash[0] if pf_cash else 100000
-            settings = _portfolio_settings(pf)
-            max_w = settings.get("max_weight_pct", 30) / 100.0
-            total_score = sum(float(r["score"]) for r in rows)
-            if pos_style == "weighted" and total_score > 0:
-                weights = {r["code"]: float(r["score"]) / total_score for r in rows}
-            else:
-                weights = {r["code"]: 1.0 / len(rows) for r in rows}
-            for code in list(weights.keys()):
-                weights[code] = min(weights[code], max_w)
+            # ② 超配减仓：行业轮动减至目标权重，其余策略仅在突破 max_weight 时减
+            holdings = trade_conn.execute(
+                """SELECT s.code, pp.stock_id, pp.shares FROM portfolio_positions pp
+                   JOIN stocks s ON pp.stock_id = s.id
+                   WHERE pp.portfolio_id=? AND pp.shares > 0""",
+                (portfolio_id,),
+            ).fetchall()
+            total_value = calc_total_value(portfolio_id, _conn=trade_conn)
+            if total_value > 0:
+                for row in holdings:
+                    code = row["code"]
+                    if code not in target_codes:
+                        continue
+                    price = _rebalance_quote_price(trade_conn, code, price_col, prefer_date=today)
+                    if not price or price <= 0:
+                        continue
+                    shares = int(row["shares"])
+                    weight = shares * price / total_value
+                    if strategy == "sector_rotation":
+                        cap_w = weights.get(code, max_w)
+                        trim_reason = "trim_to_target"
+                    else:
+                        cap_w = max_w
+                        trim_reason = "trim_overweight"
+                    if weight <= cap_w + 1e-6:
+                        continue
+                    target_sh = normalize_shares(int(total_value * cap_w / price))
+                    sell_sh = normalize_shares(shares - target_sh)
+                    sellable = _sellable_shares(
+                        trade_conn, portfolio_id, int(row["stock_id"]), True, as_of_date=today,
+                    )
+                    sell_sh = min(sell_sh, sellable)
+                    if sell_sh < LOT_SIZE:
+                        continue
+                    if _t1_blocked(int(row["stock_id"])):
+                        skipped_sell_t1.append({"code": code, "reason": "t1_same_day_buy", "sellable": sellable})
+                        continue
+                    res = trade(
+                        portfolio_id, code, "sell", sell_sh,
+                        apply_t1=True, _conn=trade_conn,
+                        price_mode=price_mode, as_of_trade_date=as_of_trade_date,
+                        reason=trim_reason,
+                    )
+                    if "error" not in res:
+                        trimmed.append({
+                            "code": code,
+                            "shares": sell_sh,
+                            "weight_before_pct": round(weight * 100, 2),
+                            "weight_cap_pct": round(cap_w * 100, 2),
+                            "reason": trim_reason,
+                        })
 
+            # ③ 欠配 / 新进目标 → 用现金补仓（不超配的不减不卖）
+            total_value = calc_total_value(portfolio_id, _conn=trade_conn)
             for r in rows:
-                price_row = trade_conn.execute(
-                    """SELECT q.close FROM stock_daily_quotes q JOIN stocks s ON q.stock_id=s.id
-                       WHERE s.code=? ORDER BY q.trade_date DESC LIMIT 1""",
-                    (r["code"],),
+                code = r["code"]
+                price = _rebalance_quote_price(trade_conn, code, price_col, prefer_date=today)
+                if not price or price <= 0:
+                    skipped.append({"code": code, "reason": "无行情"})
+                    continue
+                cur = trade_conn.execute(
+                    """SELECT shares FROM portfolio_positions pp
+                       JOIN stocks s ON pp.stock_id=s.id
+                       WHERE pp.portfolio_id=? AND s.code=?""",
+                    (portfolio_id, code),
                 ).fetchone()
-                if not price_row:
-                    skipped.append({"code": r["code"], "reason": "无行情"})
+                cur_sh = int(cur[0]) if cur else 0
+                target_val = total_value * weights[code]
+                cur_val = cur_sh * price
+                deficit = target_val - cur_val
+                min_buy = price * LOT_SIZE * (1 + COMMISSION)
+                if deficit < min_buy:
                     continue
-                price = float(price_row[0])
-                budget = cash_pool * weights[r["code"]]
-                shares = normalize_shares(int(budget / (price * (1 + COMMISSION))))
+                shares = normalize_shares(int(deficit / (price * (1 + COMMISSION))))
                 if shares < LOT_SIZE:
-                    skipped.append({"code": r["code"], "reason": "资金不足一手"})
+                    skipped.append({"code": code, "reason": "缺口不足一手"})
                     continue
-                res = trade(portfolio_id, r["code"], "buy", shares, _conn=trade_conn)
+                res = trade(
+                    portfolio_id, code, "buy", shares, _conn=trade_conn,
+                    price_mode=price_mode, as_of_trade_date=as_of_trade_date,
+                    reason="rebalance_topup",
+                )
                 if "error" in res:
-                    skipped.append({"code": r["code"], "reason": res["error"]})
+                    skipped.append({"code": code, "reason": res["error"]})
                 else:
-                    item = {"code": r["code"], "score": r["score"], "shares": shares}
+                    item = {"code": code, "score": r["score"], "shares": shares}
                     if strategy == "turtle":
                         stock_row = trade_conn.execute(
-                            "SELECT id FROM stocks WHERE code=?", (r["code"],),
+                            "SELECT id FROM stocks WHERE code=?", (code,),
                         ).fetchone()
                         if stock_row:
                             stop = _set_turtle_stop(
@@ -1042,11 +1203,14 @@ def build_from_top_n(
         "portfolio_id": portfolio_id,
         "bought": bought,
         "sold": sold,
+        "trimmed": trimmed,
         "skipped": skipped,
         "skipped_sell_t1": skipped_sell_t1,
         "count": len(bought),
         "strategy": strategy_key,
         "pos_style": pos_style,
+        "rebalance_mode": "target_weight" if strategy == "sector_rotation" else "asymmetric",
+        "max_weight_pct": round(max_w * 100, 2),
     }
     if strategy == "sector_rotation":
         out["reduce_industries"] = reduce_inds
@@ -1117,8 +1281,9 @@ def _turtle_exit_reason(
     *,
     exit_period: int,
     stop_price: float | None,
+    stop_only: bool = True,
 ) -> str | None:
-    if len(dates) < exit_period + 2:
+    if len(dates) < 2:
         return None
     di = len(dates) - 1
     dt = dates[di]
@@ -1129,6 +1294,10 @@ def _turtle_exit_reason(
         return None
     if stop_price is not None and close < stop_price:
         return "stop"
+    if stop_only:
+        return None
+    if len(dates) < exit_period + 2:
+        return None
     prior = dates[di - exit_period : di]
     lows: list[float] = []
     for d in prior:
@@ -1213,8 +1382,8 @@ def preview_turtle_exits(portfolio_id: int) -> dict:
     return out
 
 
-def run_turtle_exits(portfolio_id: int | None = None) -> dict:
-    """海龟策略日频出场：跌破低点通道或 2N 止损则卖出。"""
+def queue_turtle_exits(portfolio_id: int | None = None) -> dict:
+    """海龟出场：收盘扫描信号，下一交易日开盘执行。"""
     conn = connect_db(write=True)
     conn.row_factory = sqlite3.Row
     _ensure_tables(conn)
@@ -1228,7 +1397,9 @@ def run_turtle_exits(portfolio_id: int | None = None) -> dict:
             "SELECT * FROM portfolios WHERE default_strategy='turtle'",
         ).fetchall()
 
-    exited: list[dict] = []
+    signal_date = date.today().isoformat()
+    execute_date = _exec_date_after_signal()
+    queued: list[dict] = []
     for pf in portfolios:
         scan = _scan_turtle_exits_for_portfolio(conn, pf)
         pid = int(pf["id"])
@@ -1236,30 +1407,137 @@ def run_turtle_exits(portfolio_id: int | None = None) -> dict:
             sell_sh = min(int(sig["shares"]), int(sig.get("sellable_shares") or 0))
             if sell_sh < LOT_SIZE:
                 continue
-            res = trade(
-                pid,
-                sig["code"],
-                "sell",
-                sell_sh,
-                apply_t1=True,
-                reason="turtle_exit",
-                _conn=conn,
+            dup = conn.execute(
+                """SELECT 1 FROM portfolio_pending_orders
+                   WHERE portfolio_id=? AND kind='turtle_sell' AND execute_date=? AND code=?
+                     AND status='pending'""",
+                (pid, execute_date, sig["code"]),
+            ).fetchone()
+            if dup:
+                continue
+            conn.execute(
+                """INSERT INTO portfolio_pending_orders
+                   (portfolio_id, kind, signal_date, execute_date, code, shares, reason)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (pid, "turtle_sell", signal_date, execute_date, sig["code"], sell_sh, "turtle_exit"),
             )
-            if "error" not in res:
-                exited.append(
-                    {
-                        "portfolio_id": pid,
-                        "code": sig["code"],
-                        "name": sig["name"],
-                        "shares": sell_sh,
-                        "stop_price": sig.get("stop_price"),
-                        "exit_reason": sig.get("exit_reason"),
-                    }
-                )
+            queued.append(
+                {
+                    "portfolio_id": pid,
+                    "code": sig["code"],
+                    "name": sig["name"],
+                    "shares": sell_sh,
+                    "execute_date": execute_date,
+                    "exit_reason": sig.get("exit_reason"),
+                }
+            )
 
     conn.commit()
     conn.close()
-    return {"exited": len(exited), "details": exited}
+    return {"queued": len(queued), "execute_date": execute_date, "details": queued}
+
+
+def run_turtle_exits(portfolio_id: int | None = None) -> dict:
+    """兼容旧接口：改为收盘入队，次日开盘成交。"""
+    return queue_turtle_exits(portfolio_id=portfolio_id)
+
+
+def _scan_momentum_crashes_for_portfolio(
+    conn: sqlite3.Connection,
+    pf: sqlite3.Row | dict,
+) -> dict:
+    pid = int(dict(pf)["id"])
+    ctx = get_market_context(conn)
+    as_of = get_effective_trade_date(ctx)
+    signals: list[dict] = []
+    positions = conn.execute(
+        """SELECT pp.stock_id, pp.shares, s.code, s.name
+           FROM portfolio_positions pp
+           JOIN stocks s ON pp.stock_id = s.id
+           WHERE pp.portfolio_id=? AND pp.shares > 0""",
+        (pid,),
+    ).fetchall()
+    for pos in positions:
+        qrows = conn.execute(
+            """SELECT trade_date, close, volume FROM stock_daily_quotes
+               WHERE stock_id=? AND close IS NOT NULL
+               ORDER BY trade_date DESC LIMIT 25""",
+            (int(pos["stock_id"]),),
+        ).fetchall()
+        reason = momentum_crash_reason(qrows)
+        if not reason:
+            continue
+        sellable = _sellable_shares(
+            conn, pid, int(pos["stock_id"]), apply_t1=True, as_of_date=as_of,
+        )
+        signals.append(
+            {
+                "code": pos["code"],
+                "name": pos["name"],
+                "shares": int(pos["shares"]),
+                "sellable_shares": sellable,
+                "exit_reason": reason,
+            }
+        )
+    return {"portfolio_id": pid, "signals": signals, "signal_count": len(signals)}
+
+
+def queue_momentum_crashes(portfolio_id: int | None = None) -> dict:
+    """动量崩溃：收盘扫描，下一交易日开盘执行。"""
+    conn = connect_db(write=True)
+    conn.row_factory = sqlite3.Row
+    _ensure_tables(conn)
+
+    if portfolio_id:
+        portfolios = conn.execute(
+            "SELECT * FROM portfolios WHERE id=?", (portfolio_id,),
+        ).fetchall()
+    else:
+        portfolios = conn.execute(
+            "SELECT * FROM portfolios WHERE default_strategy='momentum'",
+        ).fetchall()
+
+    signal_date = date.today().isoformat()
+    execute_date = _exec_date_after_signal()
+    queued: list[dict] = []
+    for pf in portfolios:
+        scan = _scan_momentum_crashes_for_portfolio(conn, pf)
+        pid = int(pf["id"])
+        for sig in scan["signals"]:
+            sell_sh = min(int(sig["shares"]), int(sig.get("sellable_shares") or 0))
+            if sell_sh < LOT_SIZE:
+                continue
+            dup = conn.execute(
+                """SELECT 1 FROM portfolio_pending_orders
+                   WHERE portfolio_id=? AND kind='momentum_sell' AND execute_date=? AND code=?
+                     AND status='pending'""",
+                (pid, execute_date, sig["code"]),
+            ).fetchone()
+            if dup:
+                continue
+            conn.execute(
+                """INSERT INTO portfolio_pending_orders
+                   (portfolio_id, kind, signal_date, execute_date, code, shares, reason)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (pid, "momentum_sell", signal_date, execute_date, sig["code"], sell_sh, "momentum_crash"),
+            )
+            queued.append(
+                {
+                    "portfolio_id": pid,
+                    "code": sig["code"],
+                    "name": sig["name"],
+                    "shares": sell_sh,
+                    "execute_date": execute_date,
+                }
+            )
+
+    conn.commit()
+    conn.close()
+    return {"queued": len(queued), "execute_date": execute_date, "details": queued}
+
+
+def run_momentum_crashes(portfolio_id: int | None = None) -> dict:
+    return queue_momentum_crashes(portfolio_id=portfolio_id)
 
 
 def sync_turtle_settings(
@@ -1268,9 +1546,9 @@ def sync_turtle_settings(
     lookback: int = 20,
     top_n: int = 5,
     min_score: float = 60.0,
-    rebalance_schedule: str = "weekly",
+    rebalance_schedule: str = "none",
 ) -> dict:
-    """将海龟策略预设写入组合默认参数。"""
+    """将海龟策略预设写入组合默认参数（仅入场 + 日频止损，无定时调仓）。"""
     pf = get_portfolio(portfolio_id)
     if "error" in pf:
         return pf
@@ -1282,7 +1560,7 @@ def sync_turtle_settings(
         default_top_n=top_n,
         default_min_score=min_score,
         default_pos_style="equal",
-        rebalance_schedule=rebalance_schedule,
+        rebalance_schedule="none",
     )
 
     preview, err = select_top_n_dicts(
@@ -1369,11 +1647,23 @@ def update_portfolio_settings(portfolio_id: int, **kwargs) -> dict:
         "default_combination_id", "default_lookback",
         "default_sector_window", "default_per_sector", "name",
     }
-    sets, vals = [], []
+    sets, vals, keys = [], [], []
     for k, v in kwargs.items():
         if k in allowed and v is not None:
             sets.append(f"{k}=?")
             vals.append(v)
+            keys.append(k)
+    strat_row = conn.execute(
+        "SELECT default_strategy FROM portfolios WHERE id=?", (portfolio_id,),
+    ).fetchone()
+    eff_strategy = normalize_strategy_id(
+        kwargs.get("default_strategy") or (strat_row[0] if strat_row else "") or "composite",
+    )
+    if eff_strategy == "turtle":
+        sets = [s for i, s in enumerate(sets) if keys[i] != "rebalance_schedule"]
+        vals = [v for i, v in enumerate(vals) if keys[i] != "rebalance_schedule"]
+        sets.append("rebalance_schedule=?")
+        vals.append("none")
     if sets:
         vals.append(portfolio_id)
         conn.execute(f"UPDATE portfolios SET {', '.join(sets)} WHERE id=?", vals)
@@ -1463,27 +1753,16 @@ def rebalance_preview(portfolio_id: int) -> dict:
 
     target_codes = {r["code"] for r in selected}
     preview_sell = [
-        {"code": r["code"], "name": r["name"], "shares": r["shares"]}
+        {"code": r["code"], "name": r["name"], "shares": r["shares"], "reason": "rebalance_exit"}
         for r in old_positions if r["code"] not in target_codes
     ]
 
-    # 估算买入手数：当前现金 + 预计卖出收回资金
     conn2 = connect_db()
     conn2.row_factory = sqlite3.Row
-    pf_cash = conn2.execute("SELECT cash FROM portfolios WHERE id=?", (portfolio_id,)).fetchone()
-    estimated_cash = float(pf_cash["cash"]) if pf_cash else 0.0
-    for s in preview_sell:
-        price_row = conn2.execute(
-            """SELECT q.close FROM stock_daily_quotes q JOIN stocks s ON q.stock_id=s.id
-               WHERE s.code=? ORDER BY q.trade_date DESC LIMIT 1""", (s["code"],)
-        ).fetchone()
-        if price_row:
-            estimated_cash += float(price_row[0]) * s["shares"]
-
-    new_stocks = [r for r in selected if r["code"] not in current_codes]
-    total_score = sum(float(r["score"]) for r in selected) or 1.0
+    max_w_pct = settings.get("max_weight_pct", 30)
     pos_style = settings.get("default_pos_style", "equal")
-    max_w = settings.get("max_weight_pct", 30) / 100.0
+    total_score = sum(float(r["score"]) for r in selected) or 1.0
+    max_w = max_w_pct / 100.0
     weights = (
         {r["code"]: float(r["score"]) / total_score for r in selected}
         if pos_style == "weighted"
@@ -1492,24 +1771,99 @@ def rebalance_preview(portfolio_id: int) -> dict:
     for code in list(weights):
         weights[code] = min(weights[code], max_w)
 
-    preview_buy = []
-    for r in new_stocks:
+    preview_trim: list[dict] = []
+    tv = calc_total_value(portfolio_id, _conn=conn2)
+    if tv > 0:
+        for r in old_positions:
+            if r["code"] not in target_codes:
+                continue
+            price_row = conn2.execute(
+                """SELECT q.close FROM stock_daily_quotes q JOIN stocks s ON q.stock_id=s.id
+                   WHERE s.code=? ORDER BY q.trade_date DESC LIMIT 1""", (r["code"],)
+            ).fetchone()
+            if not price_row or not price_row[0]:
+                continue
+            price = float(price_row[0])
+            weight = int(r["shares"]) * price / tv * 100
+            if strategy == "sector_rotation":
+                cap_w = weights.get(r["code"], max_w)
+                trim_reason = "trim_to_target"
+            else:
+                cap_w = max_w
+                trim_reason = "trim_overweight"
+            cap_pct = cap_w * 100
+            if weight > cap_pct + 0.01:
+                target_sh = normalize_shares(int(tv * cap_w / price))
+                est_trim = normalize_shares(int(r["shares"]) - target_sh)
+                if est_trim >= LOT_SIZE:
+                    preview_trim.append({
+                        "code": r["code"],
+                        "name": r["name"],
+                        "est_shares": est_trim,
+                        "weight_pct": round(weight, 1),
+                        "cap_pct": round(cap_pct, 1),
+                        "reason": trim_reason,
+                    })
+
+    # 估算买入手数：当前现金 + 预计卖出/减仓收回资金
+    pf_cash = conn2.execute("SELECT cash FROM portfolios WHERE id=?", (portfolio_id,)).fetchone()
+    estimated_cash = float(pf_cash["cash"]) if pf_cash else 0.0
+    for s in preview_sell + preview_trim:
         price_row = conn2.execute(
             """SELECT q.close FROM stock_daily_quotes q JOIN stocks s ON q.stock_id=s.id
-               WHERE s.code=? ORDER BY q.trade_date DESC LIMIT 1""", (r["code"],)
+               WHERE s.code=? ORDER BY q.trade_date DESC LIMIT 1""", (s["code"],)
         ).fetchone()
-        est_shares = None
-        if price_row and float(price_row[0]) > 0:
-            budget = estimated_cash * weights.get(r["code"], 1.0 / len(selected))
-            est_shares = normalize_shares(int(budget / (float(price_row[0]) * (1 + COMMISSION))))
-            if est_shares < LOT_SIZE:
-                est_shares = None
-        preview_buy.append({
-            "code": r["code"],
-            "name": r.get("name", ""),
-            "score": round(float(r["score"]), 1),
-            "est_shares": est_shares,
-        })
+        if price_row:
+            sh = s.get("shares") or s.get("est_shares") or 0
+            estimated_cash += float(price_row[0]) * sh
+
+    held_map = {r["code"]: r for r in old_positions}
+    preview_buy = []
+    if strategy == "sector_rotation":
+        for r in selected:
+            code = r["code"]
+            price_row = conn2.execute(
+                """SELECT q.close FROM stock_daily_quotes q JOIN stocks s ON q.stock_id=s.id
+                   WHERE s.code=? ORDER BY q.trade_date DESC LIMIT 1""", (code,),
+            ).fetchone()
+            if not price_row or float(price_row[0]) <= 0:
+                continue
+            price = float(price_row[0])
+            cur_sh = int(held_map[code]["shares"]) if code in held_map else 0
+            target_val = tv * weights.get(code, 1.0 / len(selected))
+            deficit = target_val - cur_sh * price
+            min_buy = price * LOT_SIZE * (1 + COMMISSION)
+            est_shares = None
+            if deficit >= min_buy:
+                est_shares = normalize_shares(int(deficit / (price * (1 + COMMISSION))))
+                if est_shares < LOT_SIZE:
+                    est_shares = None
+            if est_shares:
+                preview_buy.append({
+                    "code": code,
+                    "name": r.get("name", ""),
+                    "score": round(float(r["score"]), 1),
+                    "est_shares": est_shares,
+                })
+    else:
+        new_stocks = [r for r in selected if r["code"] not in current_codes]
+        for r in new_stocks:
+            price_row = conn2.execute(
+                """SELECT q.close FROM stock_daily_quotes q JOIN stocks s ON q.stock_id=s.id
+                   WHERE s.code=? ORDER BY q.trade_date DESC LIMIT 1""", (r["code"],)
+            ).fetchone()
+            est_shares = None
+            if price_row and float(price_row[0]) > 0:
+                budget = estimated_cash * weights.get(r["code"], 1.0 / len(selected))
+                est_shares = normalize_shares(int(budget / (float(price_row[0]) * (1 + COMMISSION))))
+                if est_shares < LOT_SIZE:
+                    est_shares = None
+            preview_buy.append({
+                "code": r["code"],
+                "name": r.get("name", ""),
+                "score": round(float(r["score"]), 1),
+                "est_shares": est_shares,
+            })
     conn2.close()
 
     return {
@@ -1517,8 +1871,13 @@ def rebalance_preview(portfolio_id: int) -> dict:
         "days_left": days_left,
         "schedule": sched,
         "strategy": strategy,
+        "exec_timing": "next_open",
+        "execute_date": _exec_date_after_signal() if due_soon else None,
+        "rebalance_mode": "target_weight" if strategy == "sector_rotation" else "asymmetric",
+        "max_weight_pct": max_w_pct,
         "preview_buy": preview_buy,
         "preview_sell": preview_sell,
+        "preview_trim": preview_trim,
         "skip_next_rebalance": bool(pf["skip_next_rebalance"]),
     }
 
@@ -1538,19 +1897,113 @@ def set_skip_next_rebalance(portfolio_id: int, skip: bool) -> dict:
     return {"ok": True, "skip_next_rebalance": skip}
 
 
-def run_scheduled_rebalances() -> dict:
-    """检查并执行到期调仓"""
+def reset_portfolio_holdings(portfolio_id: int) -> dict:
+    """清空持仓与成交记录，恢复为全现金（用于误即时建仓后重置）。"""
+    conn = connect_db(write=True)
+    _ensure_tables(conn)
+    pf = conn.execute(
+        "SELECT initial_cash FROM portfolios WHERE id=?", (portfolio_id,),
+    ).fetchone()
+    if not pf:
+        conn.close()
+        return {"error": "组合不存在"}
+    cash = float(pf[0])
+    conn.execute("DELETE FROM portfolio_lots WHERE portfolio_id=?", (portfolio_id,))
+    conn.execute("DELETE FROM portfolio_positions WHERE portfolio_id=?", (portfolio_id,))
+    conn.execute("DELETE FROM trade_journal WHERE portfolio_id=?", (portfolio_id,))
+    conn.execute(
+        "UPDATE portfolios SET cash=? WHERE id=?",
+        (cash, portfolio_id),
+    )
+    today = date.today().isoformat()
+    conn.execute(
+        "INSERT OR REPLACE INTO portfolio_snapshots (portfolio_id, snapshot_date, total_value) VALUES (?,?,?)",
+        (portfolio_id, today, cash),
+    )
+    conn.commit()
+    conn.close()
+    return {"portfolio_id": portfolio_id, "cash": cash, "reset": True}
+
+
+def queue_build_top_n(
+    portfolio_id: int,
+    *,
+    top_n: int = 5,
+    min_score: float = 50,
+    strategy: str = "composite",
+    pos_style: str = "equal",
+    combination_id: int | None = None,
+    lookback: int = 20,
+    sector_window: int = 5,
+    per_sector: int = 2,
+) -> dict:
+    """手动建仓/调仓：收盘入队，下一交易日开盘价 + 滑点执行。"""
+    strategy = normalize_strategy_id(strategy)
+    if not is_valid_strategy(strategy, combination_id=combination_id):
+        return {"error": f"未知策略: {strategy}"}
+
+    update_portfolio_settings(
+        portfolio_id,
+        default_strategy=strategy,
+        default_top_n=top_n,
+        default_min_score=min_score,
+        default_pos_style=pos_style,
+        default_combination_id=combination_id,
+        default_lookback=lookback,
+        default_sector_window=sector_window,
+        default_per_sector=per_sector,
+    )
+
+    today_str = date.today().isoformat()
+    execute_date = _exec_date_after_signal()
+    conn = connect_db(write=True)
+    _ensure_tables(conn)
+    dup = conn.execute(
+        """SELECT 1 FROM portfolio_pending_orders
+           WHERE portfolio_id=? AND kind='rebalance' AND execute_date=? AND status='pending'""",
+        (portfolio_id, execute_date),
+    ).fetchone()
+    if dup:
+        conn.close()
+        return {
+            "queued": 0,
+            "execute_date": execute_date,
+            "exec_timing": "next_open",
+            "reason": "已有待执行的建仓/调仓计划",
+        }
+    conn.execute(
+        """INSERT INTO portfolio_pending_orders
+           (portfolio_id, kind, signal_date, execute_date, reason)
+           VALUES (?,?,?,?,?)""",
+        (portfolio_id, "rebalance", today_str, execute_date, "manual_build"),
+    )
+    conn.commit()
+    conn.close()
+    return {
+        "queued": 1,
+        "portfolio_id": portfolio_id,
+        "execute_date": execute_date,
+        "exec_timing": "next_open",
+        "strategy": strategy,
+        "top_n": top_n,
+    }
+
+
+def queue_scheduled_rebalances() -> dict:
+    """检查到期调仓计划，收盘入队，下一交易日开盘执行。"""
     today = date.today()
     today_str = today.strftime("%Y-%m-%d")
+    execute_date = _exec_date_after_signal(today)
     conn = connect_db(write=True)
     conn.row_factory = sqlite3.Row
     _ensure_tables(conn)
     rows = conn.execute(
-        """SELECT * FROM portfolios WHERE rebalance_schedule IN ('weekly','monthly')"""
+        """SELECT * FROM portfolios
+           WHERE rebalance_schedule IN ('weekly','monthly')
+             AND COALESCE(default_strategy, '') != 'turtle'"""
     ).fetchall()
-    conn.close()
 
-    done = []
+    queued: list[dict] = []
     for pf in rows:
         sched = pf["rebalance_schedule"]
         last = pf["last_rebalance_date"]
@@ -1565,38 +2018,179 @@ def run_scheduled_rebalances() -> dict:
                 due = True
         if not due:
             continue
-        # 用户手动取消了本次调仓 — 跳过并清除标志，更新 last_rebalance_date 避免下次立即触发
         if pf["skip_next_rebalance"]:
-            c = connect_db(write=True)
-            c.execute(
+            conn.execute(
                 "UPDATE portfolios SET skip_next_rebalance=0, last_rebalance_date=? WHERE id=?",
-                (today.strftime("%Y-%m-%d"), pf["id"]),
+                (today_str, pf["id"]),
             )
-            c.commit()
-            c.close()
             continue
-        settings = _portfolio_settings(pf)
-        r = build_from_top_n(
-            pf["id"],
-            top_n=settings["default_top_n"],
-            min_score=settings["default_min_score"],
-            strategy=settings["default_strategy"],
-            pos_style=settings["default_pos_style"],
-            combination_id=settings.get("default_combination_id"),
-            lookback=settings.get("default_lookback", 20),
-            sector_window=settings.get("default_sector_window", 5),
-            per_sector=settings.get("default_per_sector", 2),
+        dup = conn.execute(
+            """SELECT 1 FROM portfolio_pending_orders
+               WHERE portfolio_id=? AND kind='rebalance' AND execute_date=? AND status='pending'""",
+            (pf["id"], execute_date),
+        ).fetchone()
+        if dup:
+            continue
+        conn.execute(
+            """INSERT INTO portfolio_pending_orders
+               (portfolio_id, kind, signal_date, execute_date, reason)
+               VALUES (?,?,?,?,?)""",
+            (pf["id"], "rebalance", today_str, execute_date, sched),
         )
-        if "error" not in r:
-            c2 = connect_db(write=True)
-            c2.execute(
-                "UPDATE portfolios SET last_rebalance_date=? WHERE id=?",
-                (today.strftime("%Y-%m-%d"), pf["id"]),
+        conn.execute(
+            "UPDATE portfolios SET last_rebalance_date=? WHERE id=?",
+            (today_str, pf["id"]),
+        )
+        queued.append({"portfolio_id": pf["id"], "schedule": sched, "execute_date": execute_date})
+
+    conn.commit()
+    conn.close()
+    return {"queued": len(queued), "execute_date": execute_date, "details": queued}
+
+
+def run_scheduled_rebalances() -> dict:
+    """兼容旧接口：改为收盘入队，次日开盘成交。"""
+    return queue_scheduled_rebalances()
+
+
+def execute_pending_orders_at_open(as_of: str | None = None, *, force: bool = False) -> dict:
+    """执行待处理的自动卖单/调仓（默认按 execute_date 当日开盘价 + 滑点）。
+
+    force=True 或存在「严格过期单」(execute_date < today) 时,绕过非交易日/开盘前守卫直接补跑——
+    过期单本就该在其 execute_date 执行过,拖到今天(哪怕周末)也要补上,按各自 execute_date 开盘价成交。
+    """
+    from services.trade_calendar import is_trading_day
+
+    today_str = as_of or date.today().isoformat()
+    conn = connect_db(write=True)
+    conn.row_factory = sqlite3.Row
+    _ensure_tables(conn)
+    ctx = get_market_context(conn)
+
+    # 是否有严格过期(execute_date < today)的待办 → 有则必须补跑,不受交易日/开盘前限制
+    has_overdue = conn.execute(
+        "SELECT 1 FROM portfolio_pending_orders WHERE status='pending' AND execute_date < ? LIMIT 1",
+        (today_str,),
+    ).fetchone() is not None
+    bypass = force or has_overdue
+
+    if not is_trading_day(date.fromisoformat(today_str)) and not as_of and not bypass:
+        conn.close()
+        return {"executed": 0, "reason": "非交易日", "details": []}
+
+    if ctx.mode == "closed" and ctx.session_label == "开盘前" and not as_of and not bypass:
+        conn.close()
+        return {"executed": 0, "reason": "开盘前暂不执行", "details": []}
+
+    rows = conn.execute(
+        """SELECT * FROM portfolio_pending_orders
+           WHERE status='pending' AND execute_date <= ?
+           ORDER BY CASE kind WHEN 'turtle_sell' THEN 0 WHEN 'momentum_sell' THEN 0 ELSE 1 END, id""",
+        (today_str,),
+    ).fetchall()
+
+    exit_done: list[dict] = []
+    rebalance_rows: list[sqlite3.Row] = []
+    errors: list[dict] = []
+
+    for row in rows:
+        if row["kind"] in ("turtle_sell", "momentum_sell"):
+            pid = int(row["portfolio_id"])
+            exec_date = row["execute_date"]
+            try:
+                res = trade(
+                    pid,
+                    row["code"],
+                    "sell",
+                    int(row["shares"]),
+                    apply_t1=True,
+                    reason=row["reason"] or row["kind"],
+                    _conn=conn,
+                    price_mode="open",
+                    as_of_trade_date=exec_date,
+                )
+            except Exception as _e:  # noqa: BLE001 — 单笔卖单异常不得中断整批、不得泄漏连接
+                errors.append({"order_id": row["id"], "kind": row["kind"], "error": str(_e)[:200]})
+                continue
+            if "error" in res:
+                errors.append({"order_id": row["id"], "kind": row["kind"], "error": res["error"]})
+                continue
+            conn.execute(
+                """UPDATE portfolio_pending_orders
+                   SET status='executed', executed_at=datetime('now', 'localtime')
+                   WHERE id=?""",
+                (row["id"],),
             )
-            c2.commit()
-            c2.close()
-            done.append({"portfolio_id": pf["id"], "count": r.get("count", 0)})
-    return {"rebalanced": len(done), "details": done}
+            exit_done.append(
+                {
+                    "portfolio_id": pid,
+                    "code": row["code"],
+                    "shares": row["shares"],
+                    "kind": row["kind"],
+                    "execute_date": exec_date,
+                    "price": res.get("price"),
+                }
+            )
+        elif row["kind"] == "rebalance":
+            rebalance_rows.append(row)
+
+    if exit_done:
+        conn.commit()
+
+    rebalance_done: list[dict] = []
+    rebalance_portfolios: set[int] = set()
+    for row in rebalance_rows:
+        pid = int(row["portfolio_id"])
+        exec_date = row["execute_date"]
+        if pid in rebalance_portfolios:
+            continue
+        rebalance_portfolios.add(pid)
+        settings = _portfolio_settings(
+            conn.execute("SELECT * FROM portfolios WHERE id=?", (pid,)).fetchone()
+        )
+        try:
+            r = build_from_top_n(
+                pid,
+                top_n=settings["default_top_n"],
+                min_score=settings["default_min_score"],
+                strategy=settings["default_strategy"],
+                pos_style=settings["default_pos_style"],
+                combination_id=settings.get("default_combination_id"),
+                lookback=settings.get("default_lookback", 20),
+                sector_window=settings.get("default_sector_window", 5),
+                per_sector=settings.get("default_per_sector", 2),
+                price_mode="open",
+                as_of_trade_date=exec_date,
+            )
+        except Exception as _e:  # noqa: BLE001 — 单个组合建仓异常(含 DB 锁)不得中断整批、不得泄漏连接
+            errors.append({"order_id": row["id"], "kind": "rebalance", "error": str(_e)[:200]})
+            continue
+        if "error" in r:
+            errors.append({"order_id": row["id"], "kind": "rebalance", "error": r["error"]})
+            continue
+        conn.execute(
+            """UPDATE portfolio_pending_orders
+               SET status='executed', executed_at=datetime('now', 'localtime')
+               WHERE portfolio_id=? AND kind='rebalance' AND execute_date=? AND status='pending'""",
+            (pid, exec_date),
+        )
+        rebalance_done.append(
+            {"portfolio_id": pid, "execute_date": exec_date, "count": r.get("count", 0)}
+        )
+
+    conn.commit()
+    conn.close()
+    turtle_done = [x for x in exit_done if x.get("kind") == "turtle_sell"]
+    momentum_done = [x for x in exit_done if x.get("kind") == "momentum_sell"]
+    total = len(exit_done) + len(rebalance_done)
+    return {
+        "executed": total,
+        "turtle_exits": len(turtle_done),
+        "momentum_exits": len(momentum_done),
+        "rebalances": len(rebalance_done),
+        "details": {"turtle": turtle_done, "momentum": momentum_done, "rebalance": rebalance_done},
+        "errors": errors,
+    }
 
 
 def score_alerts(portfolio_id: int, threshold: float = 40.0) -> dict:

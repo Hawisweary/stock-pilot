@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Bell, AlertTriangle, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BetaShell, BetaTabs, BETA_TABS } from "@/components/BetaShell";
@@ -24,6 +25,15 @@ import {
 type Tab = "holdings" | "compare" | "settings";
 
 export default function PortfolioPage() {
+  return (
+    <Suspense fallback={<div className="p-8 animate-pulse bg-muted rounded h-64" />}>
+      <PortfolioInner />
+    </Suspense>
+  );
+}
+
+function PortfolioInner() {
+  const sp = useSearchParams();
   const toast = useToast();
   const [pfs, setPfs] = useState<PortfolioSummary[]>([]);
   const [selected, setSelected] = useState<PortfolioDetail | null>(null);
@@ -77,6 +87,27 @@ export default function PortfolioPage() {
     api.portfolioPricingContext().then(setPricingCtx).catch(() => {});
   };
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    const s = sp.get("strategy");
+    if (!s) return;
+    setBuildStrategy(s);
+    const defs = applyStrategyDefaults(s, strategies);
+    if (defs.top_n != null) setBuildN(defs.top_n);
+    if (defs.min_score != null) setBuildMin(defs.min_score);
+    if (defs.lookback != null) setBuildLookback(defs.lookback);
+  }, [sp, strategies]);
+
+  const urlPortfolioHandled = useRef(false);
+  useEffect(() => {
+    if (urlPortfolioHandled.current || pfs.length === 0) return;
+    const idParam = sp.get("id");
+    if (!idParam) return;
+    const pid = Number(idParam);
+    if (!Number.isFinite(pid) || !pfs.some((p) => p.id === pid)) return;
+    urlPortfolioHandled.current = true;
+    select(pid);
+  }, [sp, pfs]);
   useEffect(() => {
     api.strategyList(true).then((r) => {
       if (r.strategies?.length) setStrategies(r.strategies);
@@ -221,12 +252,32 @@ export default function PortfolioPage() {
     if (preview && !confirm(`确认建仓 ${preview.preview.length} 只？`)) return;
     try {
       const r = await api.portfolioBuildTop(selected.id, buildBody());
-      const skip = r.skipped?.length || 0;
-      toast.success(`Top${buildN} 建仓 ${r.count} 只${skip ? ` · 跳过 ${skip}` : ""}`);
+      const execDate = r.execute_date ?? "下一交易日";
+      if (r.queued) {
+        toast.success(`建仓计划已入队，${execDate} 9:30 开盘执行`);
+      } else {
+        toast.info(r.reason ?? "建仓计划未重复入队");
+      }
       setPreview(null);
       select(selected.id);
       load();
     } catch (e) { toast.error(e instanceof Error ? e.message : "建仓失败"); }
+  };
+
+  const [execingPending, setExecingPending] = useState(false);
+  const execPending = async () => {
+    setExecingPending(true);
+    try {
+      const r = await api.portfolioExecutePending();
+      if (r.executed > 0) {
+        toast.success(`已执行 ${r.executed} 单待办建仓/调仓（含调仓 ${r.rebalances ?? 0}）`);
+      } else {
+        toast.info(r.reason ?? "暂无到期待办");
+      }
+      if (selected) select(selected.id);
+      load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "执行待办失败"); }
+    finally { setExecingPending(false); }
   };
 
   const runCompare = async () => {
@@ -463,7 +514,7 @@ export default function PortfolioPage() {
                     <div className="rounded-md border border-primary/20 bg-primary/5 p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="text-xs font-medium text-primary flex items-center gap-1">
-                          <Bell className="h-3.5 w-3.5" /> {rebalancePreview.days_left === 0 ? "今日" : "明日"}将自动调仓
+                          <Bell className="h-3.5 w-3.5" /> {rebalancePreview.days_left === 0 ? "今日收盘" : "明日收盘"}生成调仓计划，{rebalancePreview.execute_date ?? "下一交易日"} 9:30 开盘执行
                           <span className="text-primary/70 font-normal ml-1">
                             （{rebalancePreview.schedule === "weekly" ? "每周" : "每月"}调仓）
                           </span>
@@ -629,12 +680,23 @@ export default function PortfolioPage() {
                     buildPerSector={buildPerSector} setBuildPerSector={setBuildPerSector}
                     strategies={strategies} combinations={combinations}
                     onPreview={runPreview} onBuild={buildTop} />
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <button
+                      type="button"
+                      onClick={execPending}
+                      disabled={execingPending}
+                      className="border border-border rounded px-2 py-1 hover:bg-muted transition-colors disabled:opacity-50"
+                    >
+                      {execingPending ? "执行中…" : "立即执行待办"}
+                    </button>
+                    <span>建仓/调仓默认排到下个交易日开盘执行；点此立即补跑到期待办。</span>
+                  </div>
                   {showTurtleTools && (
                     <div className="border rounded p-2 text-[10px] bg-muted/30 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">海龟出场</span>
+                        <span className="font-medium">海龟止损</span>
                         <span className="text-muted-foreground">
-                          lookback {buildLookback} · 出场通道 {Math.max(10, Math.floor(buildLookback / 2))} 日
+                          lookback {buildLookback} · 每日收盘扫描 2N 止损，次日 9:30 开盘执行
                         </span>
                         <button
                           type="button"
@@ -664,7 +726,7 @@ export default function PortfolioPage() {
                               <div key={s.code} className="flex justify-between gap-2 text-amber-800">
                                 <span>{s.code} {s.name}</span>
                                 <span>
-                                  {s.exit_reason === "stop" ? "2N止损" : "通道跌破"} · 可卖 {s.sellable_shares}股
+                                  {s.exit_reason === "stop" ? "2N止损" : s.exit_reason} · 可卖 {s.sellable_shares}股
                                   {s.stop_price != null ? ` · 止损 ¥${s.stop_price}` : ""}
                                 </span>
                               </div>
@@ -746,10 +808,17 @@ export default function PortfolioPage() {
               <CardHeader><CardTitle className="text-sm">组合设置 · 风控 · 定时调仓</CardTitle></CardHeader>
               <CardContent className="grid md:grid-cols-2 gap-3 text-xs">
                 <label>定时调仓
-                  <select value={settingsForm.rebalance_schedule || "none"} onChange={(e) => setSettingsForm({ ...settingsForm, rebalance_schedule: e.target.value as PortfolioSettings["rebalance_schedule"] })}
-                    className="block w-full border rounded px-2 py-1 mt-1">
+                  <select
+                    value={settingsForm.rebalance_schedule || "none"}
+                    disabled={settingsForm.default_strategy === "turtle"}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, rebalance_schedule: e.target.value as PortfolioSettings["rebalance_schedule"] })}
+                    className="block w-full border rounded px-2 py-1 mt-1 disabled:opacity-60"
+                  >
                     <option value="none">关闭</option><option value="weekly">每周</option><option value="monthly">每月</option>
                   </select>
+                  {settingsForm.default_strategy === "turtle" && (
+                    <span className="text-[10px] text-muted-foreground">海龟策略仅手动入场 + 日频止损，无定时调仓</span>
+                  )}
                 </label>
                 <label>单票最大权重 %
                   <input type="number" value={settingsForm.max_weight_pct ?? 30} onChange={(e) => setSettingsForm({ ...settingsForm, max_weight_pct: +e.target.value })}

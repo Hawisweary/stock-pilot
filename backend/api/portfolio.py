@@ -132,17 +132,25 @@ async def snapshot_all():
 
 @router.post("/portfolios/rebalance-due")
 async def rebalance_due():
-    from services.portfolio_svc import run_scheduled_rebalances
+    from services.portfolio_svc import queue_scheduled_rebalances
 
-    return run_scheduled_rebalances()
+    return queue_scheduled_rebalances()
+
+
+@router.post("/portfolios/execute-pending")
+async def execute_pending(force: bool = False):
+    """手动触发：执行待处理的次日开盘卖单/调仓。force=true 时绕过非交易日/开盘前守卫立即补跑。"""
+    from services.portfolio_svc import execute_pending_orders_at_open
+
+    return execute_pending_orders_at_open(force=force)
 
 
 @router.post("/portfolios/turtle-exits")
 async def turtle_exits_all():
-    """检查所有海龟策略组合的日频止损/出场。"""
-    from services.portfolio_svc import run_turtle_exits
+    """检查所有海龟策略组合的日频止损/出场（收盘入队，次日开盘执行）。"""
+    from services.portfolio_svc import queue_turtle_exits
 
-    return run_turtle_exits()
+    return queue_turtle_exits()
 
 
 @router.get("/portfolios/{portfolio_id}/turtle-exits-preview")
@@ -155,9 +163,9 @@ async def turtle_exits_preview(portfolio_id: int):
 
 @router.post("/portfolios/{portfolio_id}/turtle-exits")
 async def turtle_exits_one(portfolio_id: int):
-    from services.portfolio_svc import run_turtle_exits
+    from services.portfolio_svc import queue_turtle_exits
 
-    return run_turtle_exits(portfolio_id=portfolio_id)
+    return queue_turtle_exits(portfolio_id=portfolio_id)
 
 
 @router.post("/portfolios/{portfolio_id}/sync-turtle")
@@ -166,7 +174,7 @@ async def sync_turtle(
     lookback: int = Query(default=20, ge=10, le=60),
     top_n: int = Query(default=5, ge=1, le=50),
     min_score: float = Query(default=60.0, ge=0, le=100),
-    rebalance_schedule: Literal["none", "weekly", "monthly"] = Query(default="weekly"),
+    rebalance_schedule: Literal["none", "weekly", "monthly"] = Query(default="none"),
 ):
     """将海龟策略预设写入组合默认参数。"""
     from services.portfolio_svc import sync_turtle_settings
@@ -334,10 +342,10 @@ async def do_trade(portfolio_id: int, req: TradeRequest):
 def _build_top(portfolio_id: int, req: BuildRequest) -> dict:
     if not is_valid_strategy(req.strategy, combination_id=req.combination_id):
         raise HTTPException(status_code=400, detail=f"未知策略: {req.strategy}")
-    from services.portfolio_svc import build_from_top_n
+    from services.portfolio_svc import queue_build_top_n
 
     return _raise_if_error(
-        build_from_top_n(
+        queue_build_top_n(
             portfolio_id,
             top_n=req.top_n,
             min_score=req.min_score,

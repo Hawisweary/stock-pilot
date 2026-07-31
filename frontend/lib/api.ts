@@ -1044,6 +1044,12 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) },
     ),
 
+  portfolioExecutePending: () =>
+    request<{ executed: number; rebalances?: number; reason?: string; errors?: unknown[] }>(
+      `/portfolio/portfolios/execute-pending?force=true`,
+      { method: "POST" },
+    ),
+
   portfolioNavSeries: (id: number, days = 90) =>
     request<{ dates: string[]; nav: number[]; benchmark: (number | null)[]; base_value: number | null }>(
       `/portfolio/portfolios/${id}/nav-series?days=${days}`
@@ -1259,6 +1265,13 @@ export const api = {
         : "/v5/market-regime",
     ),
 
+  getMarketRegimeLayers: (tradeDate?: string) =>
+    request<Record<string, unknown>>(
+      tradeDate
+        ? `/v5/market-regime/layers?trade_date=${encodeURIComponent(tradeDate)}`
+        : "/v5/market-regime/layers",
+    ),
+
   syncMarketRegime: (tradeDate?: string) =>
     request<Record<string, unknown>>(
       tradeDate
@@ -1266,6 +1279,61 @@ export const api = {
         : "/v5/market-regime/sync",
       { method: "POST" },
     ),
+
+  getMarketRegimeHistory: (opts?: { days?: number; primary?: "csi300" | "csi800" }) => {
+    const q = new URLSearchParams();
+    if (opts?.days) q.set("days", String(opts.days));
+    if (opts?.primary) q.set("primary", opts.primary);
+    const qs = q.toString();
+    return request<Record<string, unknown>>(
+      qs ? `/v5/market-regime/history?${qs}` : "/v5/market-regime/history",
+    );
+  },
+
+  getMarketRegimeValidation: (opts?: {
+    primary?: "csi300" | "csi800";
+    days?: number;
+    includeStrategy?: boolean;
+    strategyDays?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (opts?.primary) q.set("primary", opts.primary);
+    if (opts?.days) q.set("days", String(opts.days));
+    if (opts?.includeStrategy) q.set("include_strategy", "true");
+    if (opts?.strategyDays) q.set("strategy_days", String(opts.strategyDays));
+    const qs = q.toString();
+    return request<Record<string, unknown>>(
+      qs ? `/v5/market-regime/validation?${qs}` : "/v5/market-regime/validation",
+    );
+  },
+
+  getStrategyRegimeMatrix: (autoRefresh = false) =>
+    request<Record<string, unknown>>(
+      `/v5/strategy-regime-matrix${autoRefresh ? "?auto_refresh=true" : ""}`,
+    ),
+
+  refreshStrategyRegimeMatrix: (lookbackDays = 730, backtestDays = 500) =>
+    request<Record<string, unknown>>(
+      `/v5/strategy-regime-matrix/refresh?lookback_days=${lookbackDays}&backtest_days=${backtestDays}`,
+      { method: "POST" },
+    ),
+
+  getCurrentRecommendation: (refresh = false) =>
+    request<Record<string, unknown>>(
+      refresh ? "/v5/recommendations/current?refresh=true" : "/v5/recommendations/current",
+    ),
+
+  generateRecommendation: (refreshMatrix = false) =>
+    request<Record<string, unknown>>(
+      `/v5/recommendations/generate?refresh_matrix=${refreshMatrix ? "true" : "false"}`,
+      { method: "POST" },
+    ),
+
+  getRecommendationMonitoring: (days = 365) =>
+    request<Record<string, unknown>>(`/v5/recommendations/monitoring?days=${days}`),
+
+  getRecommendationSwitches: (limit = 20) =>
+    request<{ switches: Record<string, unknown>[] }>(`/v5/recommendations/switches?limit=${limit}`),
 
   getVolatilityForecast: (tradeDate?: string) =>
     request<{
