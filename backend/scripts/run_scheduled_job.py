@@ -40,7 +40,7 @@ def _run_script_subprocess(script_name: str, args: list[str], timeout_sec: int =
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("job", choices=["nightly", "weekly", "daily", "technical_retry", "warm_cache", "warm_decay"])
+    parser.add_argument("job", choices=["nightly", "weekly", "daily", "morning", "technical_retry", "warm_cache", "warm_decay", "regime_l2_l3"])
     parser.add_argument("--factor", default=None, help="warm_decay: 因子ID")
     parser.add_argument("--fd", type=int, default=20, help="warm_decay: 未来收益天数")
     args = parser.parse_args()
@@ -90,6 +90,10 @@ def main() -> int:
                 summary += f" {label}={last[:60]}"
             except Exception as e:
                 summary += f" {label}_err:{str(e)[:40]}"
+    elif args.job == "morning":
+        from services.scheduler import run_morning_tasks
+
+        summary = run_morning_tasks()
     elif args.job == "technical_retry":
         from services.batch_score_maintenance import retry_technical_no_source
 
@@ -113,6 +117,21 @@ def main() -> int:
         if isinstance(res, dict) and not res.get("error"):
             store(key, 0, latest_any_factor_date(), res)
         summary = f"decay {args.factor}/{args.fd} 已缓存"
+    elif args.job == "regime_l2_l3":
+        import sqlite3
+
+        import config
+        from migrations import run_migrations
+        from services.regime_pipeline import run_regime_l2_l3_pipeline
+
+        conn = sqlite3.connect(config.DB_PATH, timeout=300)
+        run_migrations(conn)
+        r = run_regime_l2_l3_pipeline(conn, refresh_matrix=True)
+        conn.close()
+        summary = (
+            f"ok={r.get('ok')} bucket={r.get('regime_bucket')} "
+            f"primary={r.get('primary_strategy')} matrix={r.get('matrix_refreshed')}"
+        )
     else:  # daily
         from services.scheduler import run_daily_tasks
 

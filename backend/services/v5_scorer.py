@@ -143,7 +143,7 @@ def _regime_weights(
     conn: sqlite3.Connection,
     calc_date: str | None = None,
 ) -> dict[str, float]:
-    """根据市场状态返回动态权重；无数据或表不存在时返回基线权重。"""
+    """根据市场状态返回动态权重；趋势/高波/下跌切换 profile，震荡市用基线+delta。"""
     as_of = calc_date or latest_trading_date()
     try:
         row = conn.execute(
@@ -156,11 +156,17 @@ def _regime_weights(
     if not row:
         return dict(V5_WEIGHTS)
     regime = str(row[0])
+    profile = config.V5_REGIME_PROFILE_MAP.get(regime)
+    if profile and profile in config.V5_PROFILE_WEIGHTS:
+        weights = dict(config.V5_PROFILE_WEIGHTS[profile])
+        total = sum(weights.values())
+        if total > 0 and abs(total - 1.0) > 1e-6:
+            weights = {d: w / total for d, w in weights.items()}
+        return weights
     deltas = config.V5_REGIME_WEIGHT_DELTAS.get(regime, {})
     if not deltas:
         return dict(V5_WEIGHTS)
     weights = {d: V5_WEIGHTS[d] + deltas.get(d, 0.0) for d in V5_WEIGHTS}
-    # 归一化到 1.0
     total = sum(weights.values())
     if total > 0 and abs(total - 1.0) > 1e-6:
         weights = {d: w / total for d, w in weights.items()}

@@ -17,6 +17,22 @@ def per_stock_latest_join(alias: str = "cs") -> str:
     """
 
 
+def per_stock_latest_quality_join(alias: str = "cs") -> str:
+    """JOIN：每只股票最新且 quality_score 非空的 comprehensive 行。
+
+    八维同步可能在最新 calc_date 只写入 val_score 等局部字段，quality_score 仍为空；
+    红利防御等策略依赖 quality，须跳过这类「半行」。
+    """
+    return f"""
+        LEFT JOIN comprehensive_scores {alias} ON s.id = {alias}.stock_id
+        AND {alias}.calc_date = (
+            SELECT calc_date FROM comprehensive_scores c2
+            WHERE c2.stock_id = s.id AND c2.quality_score IS NOT NULL
+            ORDER BY calc_date DESC LIMIT 1
+        )
+    """
+
+
 def per_stock_latest_v5_join(alias: str = "cs") -> str:
     """JOIN：展示用 V5 行（优先最新且 composite_v5 非空，避免八维同步新建空 V5 行覆盖）。"""
     return f"""

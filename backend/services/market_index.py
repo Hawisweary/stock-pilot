@@ -13,6 +13,7 @@ DEFAULT_INDICES: tuple[tuple[str, str], ...] = (
     ("sh000001", "上证指数"),
     ("sz399001", "深证成指"),
     ("sh000300", "沪深300"),
+    ("sh000906", "中证800"),
     ("sz399006", "创业板指"),
 )
 
@@ -29,6 +30,10 @@ _INDEX_CODE_ALIASES: dict[str, str] = {
     "sh000300": "sh000300",
     "000300": "sh000300",
     "沪深300": "sh000300",
+    "sh000906": "sh000906",
+    "000906": "sh000906",
+    "中证800": "sh000906",
+    "csi800": "sh000906",
     "sz399006": "sz399006",
     "399006": "sz399006",
     "创业板指": "sz399006",
@@ -215,11 +220,18 @@ _ASH_TO_TS_CODE: dict[str, str] = {
     "sh000001": "000001.SH",
     "sz399001": "399001.SZ",
     "sh000300": "000300.SH",
+    "sh000906": "000906.SH",
     "sz399006": "399006.SZ",
 }
 
 
-def _fetch_tushare_index_kline(ash_code: str, *, frequency: str, count: int):
+def _fetch_tushare_index_kline(
+    ash_code: str,
+    *,
+    frequency: str,
+    count: int,
+    end_date: str | None = None,
+):
     """Ashare(新浪+腾讯) 失败/空数据时的兜底 —— Tushare 官方指数日线，更稳定。"""
     ts_code = _ASH_TO_TS_CODE.get(ash_code)
     if not ts_code:
@@ -228,10 +240,15 @@ def _fetch_tushare_index_kline(ash_code: str, *, frequency: str, count: int):
     from services.tushare_adapter import _pro
 
     pro = _pro()
-    end = datetime.now(_CN_TZ).strftime("%Y%m%d")
+    if end_date:
+        end_dt = datetime.strptime(end_date[:10], "%Y-%m-%d").replace(tzinfo=_CN_TZ)
+        end = end_dt.strftime("%Y%m%d")
+    else:
+        end_dt = datetime.now(_CN_TZ)
+        end = end_dt.strftime("%Y%m%d")
     # 多留缓冲天数以覆盖非交易日/周线聚合需要的原始日数据
     lookback_days = int(count * (7 if frequency == "1w" else 1.6)) + 20
-    start = (datetime.now(_CN_TZ) - timedelta(days=lookback_days)).strftime("%Y%m%d")
+    start = (end_dt - timedelta(days=lookback_days)).strftime("%Y%m%d")
     df = pro.index_daily(ts_code=ts_code, start_date=start, end_date=end)
     if df is None or df.empty:
         return None
@@ -264,10 +281,12 @@ def fetch_index_kline(
     days: int = 250,
     with_technical: bool = True,
     force: bool = False,
+    end_date: str | None = None,
 ) -> dict[str, Any]:
     """
     拉取单只指数 K 线（日/周）及可选技术指标。
     period: daily | weekly
+    end_date: 历史截断日 YYYY-MM-DD（回填 regime 用）
     """
     resolved = resolve_index_code(code)
     if not resolved:
@@ -275,10 +294,11 @@ def fetch_index_kline(
 
     ash_code, name = resolved
     period = "weekly" if period in ("weekly", "week", "1w") else "daily"
-    days = max(20, min(int(days), 500))
+    max_days = 800 if end_date else 500
+    days = max(20, min(int(days), max_days))
     freq = "1w" if period == "weekly" else "1d"
 
-    cache_key = f"{ash_code}:{period}:{days}:{with_technical}"
+    cache_key = f"{ash_code}:{period}:{days}:{with_technical}:{end_date or ''}"
     now = time.time()
     entries = _kline_cache.setdefault("entries", {})
     hit = entries.get(cache_key)
@@ -295,11 +315,11 @@ def fetch_index_kline(
 
     df = None
     try:
-        df = _fetch_tushare_index_kline(ash_code, frequency=freq, count=days)
+        df = _fetch_tushare_index_kline(ash_code, frequency=freq, count=days, end_date=end_date)
     except Exception:
         df = None
 
-    if df is None or df.empty:
+    if (df is None or df.empty) and not end_date:
         # Tushare 无数据/异常时兜底：Ashare（新浪+腾讯）
         from services.Ashare import get_price
 
@@ -316,11 +336,14 @@ def fetch_index_kline(
             }
 
     if df is None or df.empty:
+        err = "暂无行情数据"
+        if end_date:
+            err = f"暂无 {end_date} 之前指数数据"
         return {
             "code": ash_code,
             "name": name,
             "period": period,
-            "error": "暂无行情数据",
+            "error": err,
             "kline": [],
             "technical": [],
         }

@@ -22,7 +22,8 @@ STALE_QUOTE_DAYS = int(os.getenv("AFR_STALE_QUOTE_DAYS", "3"))
 def _relax_session() -> bool:
     return os.getenv("AFR_PORTFOLIO_RELAX_SESSION", "").lower() in ("1", "true", "yes")
 
-PriceSource = Literal["realtime", "eod_close"]
+PriceSource = Literal["realtime", "eod_close", "open"]
+PriceMode = Literal["auto", "open", "eod_close"]
 MarketMode = Literal["intraday", "eod", "closed"]
 
 
@@ -193,6 +194,28 @@ def _days_between(a: str, b: str) -> int:
         return 0
 
 
+def _get_open_price(
+    conn: sqlite3.Connection, stock_id: int, prefer_date: Optional[str] = None
+) -> Optional[tuple[float, str]]:
+    if prefer_date:
+        row = conn.execute(
+            """SELECT open, trade_date FROM stock_daily_quotes
+               WHERE stock_id=? AND trade_date=? AND open IS NOT NULL AND open > 0""",
+            (stock_id, prefer_date),
+        ).fetchone()
+        if row and row[0] is not None:
+            return float(row[0]), row[1]
+    row = conn.execute(
+        """SELECT open, trade_date FROM stock_daily_quotes
+           WHERE stock_id=? AND open IS NOT NULL AND open > 0
+           ORDER BY trade_date DESC LIMIT 1""",
+        (stock_id,),
+    ).fetchone()
+    if not row or row[0] is None:
+        return None
+    return float(row[0]), row[1]
+
+
 def _get_eod_close(
     conn: sqlite3.Connection, stock_id: int, prefer_date: Optional[str] = None
 ) -> Optional[tuple[float, str]]:
@@ -245,6 +268,8 @@ def resolve_trade_price(
     for_display: bool = False,
     ctx: Optional[MarketContext] = None,
     realtime_cache: Optional[dict[str, dict]] = None,
+    price_mode: PriceMode = "auto",
+    as_of_trade_date: Optional[str] = None,
 ) -> TradeQuote:
     """解析成交价。for_display=True 时仅估值/预览，不拦截交易时段。"""
     action = action.lower().strip()
@@ -253,24 +278,53 @@ def resolve_trade_price(
         conn = sqlite3.connect(config.DB_PATH)
     ctx = ctx or get_market_context(conn)
 
-    if not for_display and not ctx.can_trade:
+    allow_off_session = price_mode == "open" and bool(as_of_trade_date)
+    if not for_display and not ctx.can_trade and not allow_off_session:
         return TradeQuote(
             0, 0, "", "eod_close", ctx.mode, 0, "", None, None,
             ctx.session_label, ctx.block_reason,
         )
 
-    trade_date = get_effective_trade_date(ctx)
+    trade_date = as_of_trade_date or get_effective_trade_date(ctx)
     limit_up = limit_down = None
     raw = 0.0
     quote_date = ""
     source: PriceSource = "eod_close"
 
-    use_intraday = ctx.mode == "intraday" and not _relax_session()
+    use_open = price_mode == "open"
+    use_intraday = (
+        price_mode == "auto"
+        and ctx.mode == "intraday"
+        and not _relax_session()
+    )
     if _relax_session():
         use_intraday = False
 
     rt: Optional[dict] = None
-    if use_intraday:
+    if use_open:
+        prefer = as_of_trade_date or ctx.calendar_date
+        opened = _get_open_price(conn, stock_id, prefer_date=prefer)
+        if opened:
+            raw, quote_date = opened
+            source = "open"
+        else:
+            rt = (realtime_cache or {}).get(code) if realtime_cache is not None else None
+            if rt is None and prefer == ctx.calendar_date:
+                rt = _fetch_realtime(code)
+            if rt:
+                open_px = float(rt.get("open") or 0)
+                if open_px > 0:
+                    raw = open_px
+                    quote_date = prefer
+                    source = "open"
+                    limit_up = float(rt.get("limit_up") or 0) or None
+                    limit_down = float(rt.get("limit_down") or 0) or None
+        if raw <= 0:
+            eod = _get_eod_close(conn, stock_id, prefer_date=prefer)
+            if eod:
+                raw, quote_date = eod
+                source = "eod_close"
+    elif use_intraday:
         rt = (realtime_cache or {}).get(code) if realtime_cache is not None else None
         if rt is None:
             rt = _fetch_realtime(code)
@@ -286,8 +340,10 @@ def resolve_trade_price(
                     limit_up, limit_down, "停牌或无行情", "停牌或无实时行情",
                 )
 
-    if raw <= 0:
+    if raw <= 0 and not use_open:
         prefer = ctx.calendar_date if ctx.mode == "eod" and _is_weekday(ctx.now.date()) else None
+        if price_mode == "eod_close" and as_of_trade_date:
+            prefer = as_of_trade_date
         eod = _get_eod_close(conn, stock_id, prefer_date=prefer)
         if not eod:
             if not external:
@@ -351,6 +407,9 @@ def _price_label(
     if source == "realtime":
         slip = f" · 含滑点 {SLIPPAGE_PCT * 100:.2f}%" if exec_price and raw and exec_price != raw else ""
         return f"实时价 ¥{exec_price or raw}{slip}"
+    if source == "open":
+        slip = f" · 含滑点 {SLIPPAGE_PCT * 100:.2f}%" if exec_price and raw and exec_price != raw else ""
+        return f"开盘价 ¥{exec_price or raw}（{quote_date}）{slip}"
     return f"收盘价 ¥{exec_price or raw}（{quote_date}）"
 
 
@@ -431,6 +490,7 @@ def pricing_context_dict(conn: Optional[sqlite3.Connection] = None) -> dict:
         "rules": {
             "intraday": "9:30–11:30 / 13:00–15:00 按实时价 + 滑点成交",
             "eod": "15:00 后按当日收盘价（未入库则用最近 EOD）",
+            "next_open": "自动调仓/海龟出场：收盘生成计划，下一交易日开盘价 + 滑点成交",
             "limits": "涨停不可买、跌停不可卖",
         },
     }

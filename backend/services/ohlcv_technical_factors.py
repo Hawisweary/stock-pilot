@@ -99,6 +99,25 @@ def _adx(highs: list[float], lows: list[float], closes: list[float], period: int
     return round(adx, 4)
 
 
+def _ma_crossover_filtered(q: dict) -> Optional[float]:
+    """MA5/MA20 金叉 + ADX 门控 + 0.5% 迟滞；震荡市返回 0。"""
+    closes = q.get("closes") or []
+    highs = q.get("highs") or []
+    lows = q.get("lows") or []
+    if len(closes) < 20:
+        return None
+    ma5 = sum(closes[:5]) / 5
+    ma20 = sum(closes[:20]) / 20
+    adx = _adx(highs, lows, closes, 14)
+    if adx is None or adx < 20:
+        return 0.0
+    if ma5 > ma20 * 1.005:
+        return 1.0
+    if ma5 < ma20 * 0.995:
+        return -1.0
+    return 0.0
+
+
 def _wq_alpha6(closes: list[float], opens: list[float], volumes: list[float]) -> Optional[float]:
     """WQ Alpha#6 样例: -corr(open, volume, 10)"""
     if len(closes) < 11:
@@ -156,6 +175,7 @@ OHLCV_FACTOR_SPECS: list[tuple[str, str, str, Callable[[dict], Optional[float]]]
     ("F028", "wq_alpha12", "WQ", lambda q: _wq_alpha12(q["closes"], q["vols"])),
     ("F029", "margin_chg_5d", "融资", lambda q: _margin_change(q.get("margins", []), 5)),
     ("F030", "margin_chg_20d", "融资", lambda q: _margin_change(q.get("margins", []), 20)),
+    ("F031", "ma_crossover_filtered", "趋势", _ma_crossover_filtered),
 ]
 
 NEUTRALIZE_SOURCE_IDS = [

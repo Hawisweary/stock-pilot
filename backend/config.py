@@ -73,6 +73,65 @@ V5_REGIME_WEIGHT_DELTAS: dict[str, dict[str, float]] = {
     "oscillation": {},
 }
 
+# MR-2：市场状态 → V5 profile 权重（覆盖细粒度 delta，震荡市仍用基线+delta）
+V5_REGIME_PROFILE_MAP: dict[str, str] = {
+    "strong_trend_up": "momentum",
+    "weak_trend_up": "momentum",
+    "strong_trend_down": "dividend",
+    "weak_trend_down": "dividend",
+    "high_volatility": "dividend",
+    "liquidity_drought": "dividend",
+}
+
+# 市场状态识别基准指数（双轨：CSI300 行业惯例 + CSI800 策略推荐首选）
+REGIME_INDEX_CSI300 = os.getenv("AFR_REGIME_INDEX_CSI300", "sh000300")
+REGIME_INDEX_CSI800 = os.getenv("AFR_REGIME_INDEX_CSI800", "sh000906")
+# 策略推荐系统主基准（L2/L3 切换前仍双轨展示；中期默认 CSI800）
+REGIME_PRIMARY_INDEX = os.getenv("AFR_REGIME_PRIMARY_INDEX", REGIME_INDEX_CSI800)
+
+# 市场状态分类阈值（L1 七格；四格 bucket 由 regime_bucket 映射）
+REGIME_KLINE_DAYS = int(os.getenv("AFR_REGIME_KLINE_DAYS", "400"))
+REGIME_VOL_HIGH = float(os.getenv("AFR_REGIME_VOL_HIGH", "0.17"))
+REGIME_AVG_CORR_HIGH = float(os.getenv("AFR_REGIME_AVG_CORR_HIGH", "0.65"))
+REGIME_ADX_CHOP = float(os.getenv("AFR_REGIME_ADX_CHOP", "50"))
+REGIME_RET20_CHOP_ABS = float(os.getenv("AFR_REGIME_RET20_CHOP_ABS", "0.03"))
+REGIME_TREND_DOWN_PVM60 = float(os.getenv("AFR_REGIME_TREND_DOWN_PVM60", "-0.03"))
+# L1 趋势判定（P1：强方向性运动优先于高波动）
+REGIME_TREND_RET20_UP = float(os.getenv("AFR_REGIME_TREND_RET20_UP", "0.015"))
+REGIME_TREND_RET20_DOWN = float(os.getenv("AFR_REGIME_TREND_RET20_DOWN", "-0.015"))
+REGIME_TREND_RET20_STRONG = float(os.getenv("AFR_REGIME_TREND_RET20_STRONG", "0.08"))
+REGIME_TREND_RET20_STRONG_DOWN = float(os.getenv("AFR_REGIME_TREND_RET20_STRONG_DOWN", "-0.08"))
+REGIME_TREND_RET60_STRONG = float(os.getenv("AFR_REGIME_TREND_RET60_STRONG", "0.03"))
+REGIME_TREND_RET60_STRONG_DOWN = float(os.getenv("AFR_REGIME_TREND_RET60_STRONG_DOWN", "-0.03"))
+REGIME_TREND_RSI_UP = float(os.getenv("AFR_REGIME_TREND_RSI_UP", "52"))
+REGIME_TREND_RSI_DOWN = float(os.getenv("AFR_REGIME_TREND_RSI_DOWN", "48"))
+# L1 状态持续性：不对称确认期（上涨慢、下跌快）
+REGIME_PERSISTENCE_DAYS = int(os.getenv("AFR_REGIME_PERSISTENCE_DAYS", "5"))
+REGIME_UP_CONFIRM_DAYS = int(os.getenv("AFR_REGIME_UP_CONFIRM_DAYS", "5"))
+REGIME_DOWN_CONFIRM_DAYS = int(os.getenv("AFR_REGIME_DOWN_CONFIRM_DAYS", "2"))
+REGIME_VOL_CONFIRM_DAYS = int(os.getenv("AFR_REGIME_VOL_CONFIRM_DAYS", "3"))
+REGIME_OSC_CONFIRM_DAYS = int(os.getenv("AFR_REGIME_OSC_CONFIRM_DAYS", "3"))
+REGIME_ASYMMETRIC_PERSISTENCE = os.getenv("AFR_REGIME_ASYMMETRIC_PERSISTENCE", "true").lower() in ("1", "true", "yes", "on")
+
+# L2 策略×状态矩阵窗口
+REGIME_MATRIX_BACKTEST_DAYS = int(os.getenv("AFR_MATRIX_BACKTEST_DAYS", "500"))
+REGIME_MATRIX_LOOKBACK_DAYS = int(os.getenv("AFR_MATRIX_LOOKBACK_DAYS", "730"))
+REGIME_MATRIX_MIN_SAMPLES = int(os.getenv("AFR_MATRIX_MIN_SAMPLES", "10"))
+REGIME_REC_OUTCOME_HORIZONS = [
+    int(x.strip()) for x in os.getenv("AFR_REC_OUTCOME_HORIZONS", "5,20").split(",") if x.strip()
+]
+MOMENTUM_BEAR_REGIMES = frozenset({"strong_trend_down", "weak_trend_down", "liquidity_drought"})
+MOMENTUM_BEAR_MIN_SCORE_BONUS = 15.0
+# 动量崩溃：5 日跌幅 + 10 日动量转负
+MOMENTUM_CRASH_5D_PCT = -8.0
+
+# 双均线：最小持仓交易日（防震荡鞭梢）
+DUAL_MA_MIN_HOLD_DAYS = 10
+
+# 行业轮动拥挤度阈值
+SECTOR_CROWDING_WARN = 70
+SECTOR_CROWDING_BLOCK = 85
+
 # M1：动量 profile 的 quality_minus2 折扣（比 value 宽松，但仍保留惩罚）
 V5_MOMENTUM_QUALITY_DISCOUNT_MULT = float(os.getenv("V5_MOMENTUM_QUALITY_DISCOUNT_MULT", "0.85"))
 
@@ -119,6 +178,11 @@ def env_bool(key: str, default: bool = True) -> bool:
         return default
     return v.lower() in ("1", "true", "yes", "on")
 
+
+REGIME_VOL_EXPANSION = env_bool("AFR_REGIME_VOL_EXPANSION", True)
+REGIME_TREND_PRIORITY_OVER_VOL = env_bool("AFR_REGIME_TREND_PRIORITY_OVER_VOL", True)
+REGIME_PIPELINE_DAILY_REFRESH_MATRIX = env_bool("AFR_REGIME_DAILY_REFRESH_MATRIX", False)
+REGIME_PIPELINE_WEEKLY_REFRESH_MATRIX = env_bool("AFR_REGIME_WEEKLY_REFRESH_MATRIX", True)
 
 # 实验模块开关（默认开启，生产可关闭）
 ENABLE_BACKTEST = env_bool("AFR_ENABLE_BACKTEST", True)

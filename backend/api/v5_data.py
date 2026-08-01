@@ -502,27 +502,280 @@ async def data_quality_detect(trade_date: str | None = None):
 
 @router.get("/market-regime")
 async def market_regime(trade_date: str | None = None):
-    """获取市场状态分类（趋势/震荡/高波动）。"""
+    """获取市场状态分类（双轨：CSI300 + CSI800）。"""
     from database import get as get_db_conn
     from services.market_regime import get_regime_for_date, sync_regime
 
     conn = get_db_conn()
-    if trade_date:
-        row = get_regime_for_date(conn, trade_date)
-        if row.get("regime"):
-            return row
-    # 无数据时自动检测并返回
+    row = get_regime_for_date(conn, trade_date)
+    if row.get("regime") and (row.get("regime_csi800") or row.get("indices")):
+        return row
     return sync_regime(conn, trade_date=trade_date)
 
 
 @router.post("/market-regime/sync")
 async def market_regime_sync(trade_date: str | None = None):
-    """手动触发市场状态分类检测。"""
+    """手动触发市场状态双轨分类检测。"""
     from database import get as get_db_conn
     from services.market_regime import sync_regime
 
     conn = get_db_conn()
     return sync_regime(conn, trade_date=trade_date)
+
+
+@router.get("/market-regime/agreement-stats")
+async def market_regime_agreement_stats(days: int = 252):
+    """CSI300 vs CSI800 历史标签一致率。"""
+    from database import get as get_db_conn
+    from services.market_regime import get_regime_agreement_stats
+
+    conn = get_db_conn()
+    return get_regime_agreement_stats(conn, days=max(30, min(days, 730)))
+
+
+@router.get("/market-regime/history")
+async def market_regime_history(
+    days: int = 730,
+    primary: str = "csi800",
+):
+    """L1 四格状态历史序列（周期可视化）。"""
+    from database import get as get_db_conn
+    from services.market_regime import get_regime_history
+
+    conn = get_db_conn()
+    return get_regime_history(
+        conn,
+        primary=primary if primary in ("csi800", "csi300") else "csi800",
+        days=max(30, min(days, 730)),
+    )
+
+
+@router.post("/market-regime/recompute-persistence")
+async def market_regime_recompute_persistence(
+    days: int = 730,
+    persistence_days: int | None = None,
+):
+    """从 raw 日频快照重算持续性确认状态。"""
+    from database import get as get_db_conn
+    from services.market_regime import recompute_regime_persistence
+
+    conn = get_db_conn()
+    return recompute_regime_persistence(
+        conn,
+        days=max(30, min(days, 730)),
+        min_days=persistence_days,
+    )
+
+
+@router.get("/market-regime/validation")
+async def market_regime_validation(
+    primary: str = "csi800",
+    days: int = 365,
+    include_strategy: bool = False,
+    strategy_days: int = 180,
+    include_l3_sim: bool = False,
+    l3_sim_days: int = 365,
+):
+    """市场状态划分三层验证报告（内部一致性 / Walk-Forward / 可选策略条件 / L3 切换模拟）。"""
+    from database import get as get_db_conn
+    from services.regime_validation import generate_validation_report
+
+    if primary not in ("csi300", "csi800"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="primary 须为 csi300 或 csi800")
+    conn = get_db_conn()
+    return generate_validation_report(
+        conn,
+        primary=primary,
+        days=max(60, min(days, 730)),
+        include_strategy=include_strategy,
+        strategy_days=max(90, min(strategy_days, 365)),
+        include_l3_sim=include_l3_sim,
+        l3_sim_days=max(90, min(l3_sim_days, 730)),
+    )
+
+
+@router.get("/strategy-regime-matrix")
+async def strategy_regime_matrix(auto_refresh: bool = False):
+    """L2：策略×四格状态绩效矩阵 + 当前推荐。"""
+    from database import get as get_db_conn
+    from services.strategy_regime_performance import get_strategy_regime_matrix
+
+    conn = get_db_conn()
+    return get_strategy_regime_matrix(conn, auto_refresh=auto_refresh)
+
+
+@router.post("/strategy-regime-matrix/refresh")
+async def strategy_regime_matrix_refresh(
+    lookback_days: int | None = None,
+    backtest_days: int | None = None,
+):
+    """重算 L2 矩阵（回测 + 模拟盘）。"""
+    import config
+    from database import get as get_db_conn
+    from services.strategy_regime_performance import refresh_strategy_regime_matrix
+
+    lb = lookback_days if lookback_days is not None else config.REGIME_MATRIX_LOOKBACK_DAYS
+    bt = backtest_days if backtest_days is not None else config.REGIME_MATRIX_BACKTEST_DAYS
+    conn = get_db_conn()
+    return refresh_strategy_regime_matrix(
+        conn,
+        lookback_days=max(60, min(lb, 730)),
+        backtest_days=max(90, min(bt, 730)),
+    )
+
+
+@router.get("/strategy-regime-matrix/drilldown/{strategy_id}")
+async def strategy_regime_drilldown(strategy_id: str, backtest_days: int = 180):
+    """七格 drill-down（单策略）。"""
+    from database import get as get_db_conn
+    from services.strategy_regime_performance import build_drilldown_7
+
+    conn = get_db_conn()
+    return {
+        "strategy": strategy_id,
+        "cells": build_drilldown_7(
+            conn, strategy_id, backtest_days=max(90, min(backtest_days, 365)),
+        ),
+    }
+
+
+@router.get("/recommendations/current")
+async def recommendations_current(refresh: bool = False):
+    """L3：当前策略推荐（市场状态 + 矩阵 + 选股预览）。"""
+    from database import get as get_db_conn
+    from services.strategy_recommender import generate_current_recommendation, get_current_recommendation
+
+    conn = get_db_conn()
+    if refresh:
+        return generate_current_recommendation(conn, refresh_matrix=False, persist=True)
+    return get_current_recommendation(conn)
+
+
+@router.post("/recommendations/generate")
+async def recommendations_generate(refresh_matrix: bool = False):
+    """手动生成并落库 L3 推荐。"""
+    from database import get as get_db_conn
+    from services.strategy_recommender import generate_current_recommendation
+
+    conn = get_db_conn()
+    return generate_current_recommendation(conn, refresh_matrix=refresh_matrix, persist=True)
+
+
+@router.get("/recommendations/monitoring")
+async def recommendations_monitoring(days: int = 365):
+    """P1：推荐命中率 + regime 切换摘要。"""
+    from database import get as get_db_conn
+    from services.strategy_recommendation_monitor import get_monitoring_dashboard
+
+    conn = get_db_conn()
+    return get_monitoring_dashboard(conn, days=max(30, min(days, 730)))
+
+
+@router.get("/recommendations/switches")
+async def recommendations_switches(limit: int = 30):
+    """P1：regime / 策略切换日志。"""
+    from database import get as get_db_conn
+    from services.strategy_recommendation_monitor import get_recent_switches
+
+    conn = get_db_conn()
+    return {"switches": get_recent_switches(conn, limit=max(1, min(limit, 100)))}
+
+
+@router.get("/market-regime/layers")
+async def market_regime_layers(trade_date: str | None = None):
+    """规则 / Jump / HMM 并列四格标签（Dashboard 对照条）。"""
+    from database import get as get_db_conn
+    from services.market_regime import get_regime_layers_for_date
+
+    conn = get_db_conn()
+    return get_regime_layers_for_date(conn, trade_date)
+
+
+@router.get("/market-regime/hmm/compare")
+async def market_regime_hmm_compare(days: int = 730, persist: bool = False):
+    """P3-C：HMM vs 规则 L1 对照（可选落库）。"""
+    from database import get as get_db_conn
+    from services.regime_hmm import compare_hmm_vs_rules, fit_and_persist_full_sample
+
+    conn = get_db_conn()
+    report = compare_hmm_vs_rules(conn, days=max(90, min(days, 730)))
+    if persist and not report.get("error"):
+        report["persist"] = fit_and_persist_full_sample(conn, days=days)
+    return report
+
+
+@router.get("/market-regime/cluster/compare")
+async def market_regime_cluster_compare(
+    days: int = 730,
+    persist: bool = False,
+    method: str = "both",
+):
+    """P3-D：K-Means / GMM vs 规则 L1 对照（可选落库）。"""
+    from database import get as get_db_conn
+    from services.regime_cluster import (
+        compare_cluster_vs_rules,
+        fit_and_persist_full_sample,
+    )
+
+    methods = ("kmeans", "gmm") if method == "both" else (method,)
+    conn = get_db_conn()
+    report = compare_cluster_vs_rules(conn, days=max(90, min(days, 730)), methods=methods)
+    if persist and not report.get("error"):
+        report["persist"] = fit_and_persist_full_sample(conn, days=days, methods=methods)
+    return report
+
+
+@router.get("/market-regime/jump/compare")
+async def market_regime_jump_compare(
+    days: int = 730,
+    persist: bool = False,
+    penalties: str = "25,50,75,100",
+    backend: str = "auto",
+):
+    """P3-E：Jump Model vs 规则 L1 对照（λ 扫描，可选落库）。"""
+    from database import get as get_db_conn
+    from services.regime_jump import (
+        compare_jump_vs_rules,
+        fit_and_persist_full_sample,
+    )
+
+    lam_tuple = tuple(float(x.strip()) for x in penalties.split(",") if x.strip())
+    conn = get_db_conn()
+    report = compare_jump_vs_rules(
+        conn,
+        days=max(90, min(days, 730)),
+        penalties=lam_tuple or (25.0, 50.0, 75.0, 100.0),
+        backend=backend if backend in ("auto", "jumpmodels", "simple") else "auto",
+    )
+    if persist and not report.get("error"):
+        lam = report.get("recommended_penalty") or 50.0
+        report["persist"] = fit_and_persist_full_sample(
+            conn, days=days, jump_penalty=float(lam), backend=backend if backend in ("auto", "jumpmodels", "simple") else "auto",
+        )
+    return report
+
+
+@router.post("/regime-pipeline/run")
+async def regime_pipeline_run(
+    refresh_matrix: bool = True,
+    skip_regime: bool = False,
+    lookback_days: int | None = None,
+    backtest_days: int | None = None,
+):
+    """手动触发 L1→L2→L3 流水线（运维/补跑）。"""
+    import config
+    from database import get as get_db_conn
+    from services.regime_pipeline import run_regime_l2_l3_pipeline
+
+    conn = get_db_conn()
+    return run_regime_l2_l3_pipeline(
+        conn,
+        skip_regime=skip_regime,
+        refresh_matrix=refresh_matrix,
+        lookback_days=lookback_days or config.REGIME_MATRIX_LOOKBACK_DAYS,
+        backtest_days=backtest_days or config.REGIME_MATRIX_BACKTEST_DAYS,
+    )
 
 
 @router.get("/volatility-forecast")

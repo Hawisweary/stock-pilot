@@ -186,6 +186,15 @@ def test_fetch_latest_macro_extended():
     )
 
 
+def test_sync_v5_daily_does_not_nameerror_on_entry():
+    """回归：locals_snapshot 引用 skip_per_stock 但函数未声明会导致每日 V5 流水线整段失败。"""
+    import inspect
+
+    from services.v5_data_sync import sync_v5_data_sources
+
+    assert "skip_per_stock" in inspect.signature(sync_v5_data_sources).parameters
+
+
 @pytest.mark.network
 def test_sync_sector_fund_flow():
     import requests

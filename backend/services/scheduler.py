@@ -15,6 +15,7 @@ _STATE_KEYS = {
     "weekly_sync": "last_weekly_sync_date",
     "technical_retry": "last_technical_retry_date",
     "daily_tasks": "last_daily_tasks_date",
+    "morning_tasks": "last_morning_tasks_date",
 }
 
 
@@ -188,6 +189,18 @@ def start_scheduler(app):
                 state[_STATE_KEYS["technical_retry"]] = today_key
                 _save_state(_STATE_KEYS["technical_retry"], today_key)
             if (
+                now_minutes >= 9 * 60 + 35
+                and state.get(_STATE_KEYS["morning_tasks"]) != today_key
+            ):
+                logger.info("[Scheduler] %s 触发开盘执行任务(子进程)...", datetime.now().strftime("%H:%M"))
+                try:
+                    out = _run_job_subprocess("morning", timeout_sec=1800)
+                    logger.info("[Scheduler] 开盘执行任务(子进程): %s", out)
+                except Exception as e:
+                    logger.warning("[Scheduler] run_morning_tasks failed: %s", e)
+                state[_STATE_KEYS["morning_tasks"]] = today_key
+                _save_state(_STATE_KEYS["morning_tasks"], today_key)
+            if (
                 now_minutes >= 15 * 60 + 30
                 and state.get(_STATE_KEYS["daily_tasks"]) != today_key
             ):
@@ -203,7 +216,28 @@ def start_scheduler(app):
 
     t = threading.Thread(target=_loop, daemon=True, name="daily-scheduler")
     t.start()
-    logger.info("[Scheduler] 每日自动任务已启动 (15:30触发, 状态持久化+错过窗口自动补跑)")
+    logger.info("[Scheduler] 每日自动任务已启动 (9:35开盘执行, 15:30收盘入队, 状态持久化+错过窗口自动补跑)")
+
+
+def run_morning_tasks() -> str:
+    """开盘执行待处理自动卖单/调仓。"""
+    msg = ""
+    try:
+        from services.portfolio_svc import execute_pending_orders_at_open
+
+        r = execute_pending_orders_at_open()
+        if r.get("executed"):
+            msg += f"开盘执行({r['executed']}: 海龟{r.get('turtle_exits', 0)} 调仓{r.get('rebalances', 0)}) "
+        elif r.get("reason"):
+            msg += f"开盘执行跳过({r['reason']}) "
+        else:
+            msg += "开盘执行(无待办) "
+        if r.get("errors"):
+            msg += f"错误{len(r['errors'])} "
+    except Exception as e:
+        msg += f"开盘执行:{e} "
+    logger.info("[Scheduler] %s", msg.strip())
+    return msg
 
 
 def _persist_dimension_rows(table: str, rows: list[dict], date_key: str = "date") -> int:
@@ -332,6 +366,34 @@ def run_daily_tasks():
             msg += f"行情同步[fallback]({last_line[:60]}) "
         except Exception as e2:
             msg += f"行情fallback:{str(e2)[:60]} "
+
+    # ② 市场页特色数据：沪深股通十大成交 / L2 资金流 / 资金共振 / 市场广度·总貌
+    try:
+        import subprocess, sys, os
+
+        scripts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts")
+        for script, label, extra_args, timeout in [
+            ("tushare_sync_hsgt_top10.py", "沪深股通", ["--days", "5"], 600),
+            ("tushare_sync_moneyflow_detail.py", "L2资金流", ["--days", "5"], 1200),
+            ("compute_alpha_factors_v1.py", "资金共振", ["--days", "5", "--skip-surprise"], 900),
+            ("akshare_sync_market_breadth.py", "市场广度", [], 300),
+        ]:
+            try:
+                r = subprocess.run(
+                    [sys.executable, os.path.join(scripts_dir, script)] + extra_args,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
+                tail = (r.stdout or "").strip().split("\n")[-1][:50]
+                if r.returncode == 0:
+                    msg += f"{label}({tail}) "
+                else:
+                    msg += f"{label}失败({(r.stderr or tail)[-40:]}) "
+            except Exception as e:
+                msg += f"{label}:{str(e)[:40]} "
+    except Exception as e:
+        msg += f"市场特色:{e} "
 
     # 目标日期必须在行情同步之后解析，否则全流程按旧交易日计算
     today = latest_trading_date()
@@ -550,19 +612,23 @@ def run_daily_tasks():
 
     try:
         from services.portfolio_svc import (
-            run_scheduled_rebalances,
-            run_turtle_exits,
+            queue_momentum_crashes,
+            queue_scheduled_rebalances,
+            queue_turtle_exits,
             snapshot_all_portfolios,
         )
 
         r = snapshot_all_portfolios()
         msg += f"模拟盘快照({r.get('updated', 0)}) "
-        te = run_turtle_exits()
-        if te.get("exited"):
-            msg += f"海龟出场({te['exited']}) "
-        rb = run_scheduled_rebalances()
-        if rb.get("rebalanced"):
-            msg += f"调仓({rb['rebalanced']}) "
+        te = queue_turtle_exits()
+        if te.get("queued"):
+            msg += f"海龟出场入队({te['queued']}→{te.get('execute_date')}) "
+        mc = queue_momentum_crashes()
+        if mc.get("queued"):
+            msg += f"动量崩溃入队({mc['queued']}→{mc.get('execute_date')}) "
+        rb = queue_scheduled_rebalances()
+        if rb.get("queued"):
+            msg += f"调仓入队({rb['queued']}→{rb.get('execute_date')}) "
     except Exception as e:
         msg += f"模拟盘:{e} "
 

@@ -55,6 +55,7 @@ def init_factor_store() -> sqlite3.Connection:
         ("F028", "wq_alpha12", "WQ", "sign(dV)*(-dC)"),
         ("F029", "margin_chg_5d", "融资", "margin/shift(5)-1"),
         ("F030", "margin_chg_20d", "融资", "margin/shift(20)-1"),
+        ("F031", "ma_crossover_filtered", "趋势", "MA5/MA20+ADX+迟滞"),
     ]
     for fid, name, cat, formula in factors:
         conn.execute(
@@ -125,6 +126,11 @@ def _compute_technical_factors(conn, sid: int, dt: str, *, code: str | None = No
     ma20 = sum(closes[:20]) / 20
     _upsert_factor(conn, sid, dt, "F013", 1 if ma5 > ma20 else -1)
     n += 1
+    from services.ohlcv_technical_factors import _ma_crossover_filtered
+    f031 = _ma_crossover_filtered(panel)
+    if f031 is not None:
+        _upsert_factor(conn, sid, dt, "F031", f031)
+        n += 1
     return n
 
 

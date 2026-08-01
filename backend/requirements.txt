@@ -6,6 +6,9 @@ httpx>=0.25.0
 python-dotenv>=1.0.0
 pandas>=2.0.0
 numpy>=1.24.0
+scikit-learn>=1.3.0
+hmmlearn>=0.3.2
+jumpmodels>=0.1.0; python_version >= "3.10"
 akshare>=1.18.0
 yfinance>=0.2.0
 adata>=2.9.0

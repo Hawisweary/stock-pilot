@@ -298,6 +298,26 @@ async def market_breadth(days: int = Query(30, ge=1, le=250, description="创新
     }
 
 
+def _fetch_sw_boards_with_fallback(trade_date: str, max_back: int = 5) -> tuple[list[dict], str | None]:
+    """按交易日回溯拉申万一级板块，避免当日 sw_daily 尚未发布时返回空并污染缓存。"""
+    from services.tushare_adapter import _pro, _throttle, fetch_sw_l1_boards
+
+    dates: list[str] = [trade_date]
+    try:
+        pro = _pro()
+        _throttle()
+        df = pro.trade_cal(exchange="SSE", end_date=trade_date, is_open="1")
+        if df is not None and not df.empty:
+            dates = sorted(df["cal_date"].astype(str).tolist())[-max_back:]
+    except Exception:
+        pass
+    for d in reversed(dates):
+        boards = fetch_sw_l1_boards(d)
+        if boards:
+            return boards, d
+    return [], trade_date
+
+
 @router.get("/boards")
 async def industry_boards(force: bool = Query(False, description="跳过板块缓存，强制拉取")):
     """申万一级行业板块涨跌幅排行（Tushare Pro 官方数据为主，westock-data 兜底，
@@ -307,16 +327,26 @@ async def industry_boards(force: bool = Query(False, description="跳过板块�
     from services.trade_pricing import seconds_until_next_open
 
     ttl = seconds_until_next_open() or TTL_BOARDS_SEC
-    if not force and now - _cache["boards"]["time"] < ttl and _cache["boards"]["data"]:
-        return _cache["boards"]["data"]
+    cached = _cache["boards"]["data"]
+    if (
+        not force
+        and cached
+        and now - _cache["boards"]["time"] < ttl
+        and cached.get("total", 0) > 0
+        and cached.get("all_boards")
+    ):
+        return cached
+    if force:
+        _cache["boards"] = {"time": 0, "data": None}
 
     boards: list[dict] = []
+    trade_date_used: str | None = None
     try:
         # 1. Tushare sw_daily 全市场申万一级指数（官方数据，主数据源）
-        from services.tushare_adapter import fetch_sw_l1_boards, latest_trading_date
+        from services.tushare_adapter import latest_trading_date
 
         trade_date = latest_trading_date(time.strftime("%Y%m%d"))
-        boards = fetch_sw_l1_boards(trade_date)
+        boards, trade_date_used = _fetch_sw_boards_with_fallback(trade_date or time.strftime("%Y%m%d"))
     except Exception:
         boards = []
 
@@ -358,8 +388,12 @@ async def industry_boards(force: bool = Query(False, description="跳过板块�
         flat_count = sum(1 for b in boards if b["change_pct"] == 0)
         avg_chg = round(sum(b["change_pct"] for b in boards) / len(boards), 2) if boards else 0
 
+        display_date = time.strftime("%Y-%m-%d")
+        if trade_date_used and len(trade_date_used) == 8:
+            display_date = f"{trade_date_used[:4]}-{trade_date_used[4:6]}-{trade_date_used[6:8]}"
+
         result = {
-            "date": time.strftime("%Y-%m-%d"),
+            "date": display_date,
             "total": len(boards),
             "up_count": up_count,
             "down_count": down_count,
@@ -369,7 +403,8 @@ async def industry_boards(force: bool = Query(False, description="跳过板块�
             "top_losers": bottom5,
             "all_boards": boards,
         }
-        _cache["boards"] = {"time": now, "data": result}
+        if boards:
+            _cache["boards"] = {"time": now, "data": result}
         return result
     except Exception as e:
         return {"error": str(e), "detail": "板块数据获取失败，westock-data 调用异常", "degraded": True}

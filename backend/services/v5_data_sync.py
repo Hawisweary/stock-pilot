@@ -18,7 +18,6 @@ from services.mood_scorer import compute_all_mood_v5
 from services.news_fetcher import sync_all_news
 from services.policy_event_sync import sync_policy_v5
 from services.data_quality import detect_and_write
-from services.market_regime import sync_regime
 from services.ml_impute import impute_v5_tables
 from services.volatility_forecast import sync_forecast
 from services.quality_metrics_calc import compute_all_v5_metrics
@@ -40,6 +39,7 @@ V5_SYNC_MODE_PRESETS: dict[str, dict[str, Any]] = {
         "use_llm_events": True,
         "llm_only_missing_news": True,
         "skip_tushare_events": True,
+        "regime_refresh_matrix": False,
     },
     "nightly": {
         "skip_macro": True,
@@ -78,6 +78,7 @@ V5_SYNC_MODE_PRESETS: dict[str, dict[str, Any]] = {
         "skip_tushare_events": False,
         "tushare_event_days": 30,
         "skip_per_stock": False,
+        "regime_refresh_matrix": True,
     },
 }
 
@@ -155,6 +156,7 @@ def sync_v5_data_sources(
     skip_v5_scores: bool = False,
     skip_tushare_events: bool = False,
     tushare_event_days: int = 10,
+    skip_per_stock: bool = True,
     announcement_limit: int = 30,
     news_limit: int = 15,
     skip_volatility_forecast: bool = False,
@@ -218,9 +220,22 @@ def sync_v5_data_sources(
     try:
         with sqlite3.connect(config.DB_PATH, timeout=120) as conn:
             conn.execute("PRAGMA busy_timeout=30000")
-            result["steps"]["market_regime"] = sync_regime(conn)
+            from services.regime_pipeline import run_regime_l2_l3_pipeline
+
+            if mode == "weekly":
+                refresh_matrix = opts.get(
+                    "regime_refresh_matrix", config.REGIME_PIPELINE_WEEKLY_REFRESH_MATRIX,
+                )
+            else:
+                refresh_matrix = opts.get(
+                    "regime_refresh_matrix", config.REGIME_PIPELINE_DAILY_REFRESH_MATRIX,
+                )
+            result["steps"]["regime_pipeline"] = run_regime_l2_l3_pipeline(
+                conn,
+                refresh_matrix=bool(refresh_matrix),
+            )
     except Exception as e:
-        result["steps"]["market_regime"] = {"error": str(e)}
+        result["steps"]["regime_pipeline"] = {"error": str(e)}
 
     if not opts["skip_sector"]:
         try:
@@ -350,7 +365,7 @@ def sync_v5_nightly_fetch(stock_ids: list[int] | None = None) -> dict:
 
 
 def sync_v5_weekly(stock_ids: list[int] | None = None) -> dict:
-    """每周：EPS 修正 + 行业上修 + v5_metrics + 宏观 + 主力流 + V5 分数。"""
+    """每周：EPS 修正 + 行业上修 + v5_metrics + 宏观 + 主力流 + V5 分数 + L2 矩阵。"""
     result = sync_v5_data_sources(stock_ids=stock_ids, mode="weekly")
     extra: dict = {}
     try:

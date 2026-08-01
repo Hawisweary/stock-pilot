@@ -51,7 +51,15 @@ def patch_db(tmp_path, monkeypatch):
             volume REAL, change_pct REAL,
             UNIQUE(stock_id, trade_date)
         );
+        CREATE TABLE IF NOT EXISTS trade_calendar (
+            cal_date TEXT PRIMARY KEY,
+            is_open INTEGER NOT NULL
+        );
     """)
+    conn.execute(
+        "INSERT OR REPLACE INTO trade_calendar (cal_date, is_open) VALUES (?,1)",
+        (today,),
+    )
     for code, price in [
         ("000001", 10.0), ("000002", 5.0), ("000003", 100.0),
         ("000004", 12.0), ("000005", 8.0), ("000006", 15.0),
@@ -69,6 +77,9 @@ def patch_db(tmp_path, monkeypatch):
         )
     conn.commit()
     conn.close()
+
+    from services.trade_calendar import invalidate_cache
+    invalidate_cache()
 
     yield svc  # 测试函数通过参数名 `svc` 或直接用下面的 helper
 
@@ -237,3 +248,35 @@ def test_delete_clears_lots_and_journal(svc, pf, tmp_path):
 def test_calc_total_value_non_negative(svc, pf):
     tv = svc.calc_total_value(pf["id"])
     assert tv >= 0
+
+
+def test_asymmetric_rebalance_keeps_in_target(svc, pf, monkeypatch, tmp_path):
+    """仍在 Top N 的持仓不应被清仓，仅掉出名单才全卖。"""
+    import config
+    from datetime import timedelta
+
+    monkeypatch.setattr(
+        "services.portfolio_svc.select_top_n_dicts",
+        lambda **kwargs: (
+            [{"code": "000001", "score": 90.0, "name": "股票000001", "stock_id": 1}],
+            None,
+        ),
+    )
+    svc.trade(pf["id"], "000001", "buy", 1000)
+    svc.trade(pf["id"], "000002", "buy", 100)
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    conn = sqlite3.connect(config.DB_PATH)
+    conn.execute(
+        "UPDATE portfolio_lots SET buy_date=? WHERE portfolio_id=?",
+        (yesterday, pf["id"]),
+    )
+    conn.commit()
+    conn.close()
+
+    r = svc.build_from_top_n(pf["id"], top_n=1, min_score=50)
+    assert "error" not in r, r
+    codes = [p["code"] for p in svc.get_portfolio(pf["id"])["positions"]]
+    assert "000001" in codes
+    assert "000002" not in codes
+    assert any(s["code"] == "000002" for s in r["sold"])
+    assert r.get("rebalance_mode") == "asymmetric"

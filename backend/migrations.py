@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 54
+CURRENT_SCHEMA_VERSION = 57
 
 MIGRATIONS: list[tuple[int, str]] = [
     (2, """
@@ -1143,6 +1143,160 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE market_regime_daily ADD COLUMN ma20_slope REAL;
         ALTER TABLE market_regime_daily ADD COLUMN liquidity_score REAL;
         ALTER TABLE market_regime_daily ADD COLUMN regime_label TEXT;
+    """),
+    (55, """
+        -- 市场状态双轨：CSI300（惯例）+ CSI800（策略推荐基准）
+        ALTER TABLE market_regime_daily ADD COLUMN regime_csi800 TEXT;
+        ALTER TABLE market_regime_daily ADD COLUMN regime_csi800_label TEXT;
+        ALTER TABLE market_regime_daily ADD COLUMN regime_bucket_csi300 TEXT;
+        ALTER TABLE market_regime_daily ADD COLUMN regime_bucket_csi800 TEXT;
+        ALTER TABLE market_regime_daily ADD COLUMN regime_label_agreement INTEGER;
+        ALTER TABLE market_regime_daily ADD COLUMN regime_bucket_agreement INTEGER;
+        ALTER TABLE market_regime_daily ADD COLUMN rsi_14_csi800 REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN volatility_20_csi800 REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN adx_csi800 REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN return_20d_csi800 REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN return_60d_csi800 REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN price_vs_ma20_csi800 REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN price_vs_ma60_csi800 REAL;
+        ALTER TABLE market_regime_daily ADD COLUMN ma20_slope_csi800 REAL;
+    """),
+    (56, """
+        -- L2：策略 × 市场状态（四格）绩效矩阵
+        CREATE TABLE IF NOT EXISTS strategy_regime_metrics (
+            strategy_id         TEXT    NOT NULL,
+            regime_bucket       TEXT    NOT NULL,
+            source              TEXT    NOT NULL DEFAULT 'backtest',
+            portfolio_id        INTEGER NOT NULL DEFAULT 0,
+            sample_days         INTEGER,
+            total_return_pct    REAL,
+            ann_return_pct      REAL,
+            ann_vol_pct         REAL,
+            sharpe              REAL,
+            max_drawdown_pct    REAL,
+            win_rate_pct        REAL,
+            is_recommended      INTEGER NOT NULL DEFAULT 0,
+            as_of_date          TEXT    NOT NULL,
+            lookback_days       INTEGER,
+            backtest_days       INTEGER,
+            updated_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (strategy_id, regime_bucket, source, portfolio_id, as_of_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_srm_date ON strategy_regime_metrics(as_of_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_srm_bucket ON strategy_regime_metrics(regime_bucket, as_of_date DESC);
+    """),
+    (57, """
+        -- L3：每日策略推荐快照
+        CREATE TABLE IF NOT EXISTS strategy_recommendations_daily (
+            trade_date          TEXT    PRIMARY KEY,
+            regime_bucket       TEXT,
+            primary_strategy    TEXT,
+            confidence          REAL,
+            payload_json        TEXT    NOT NULL,
+            updated_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_rec_date ON strategy_recommendations_daily(trade_date DESC);
+    """),
+    (58, """
+        -- L1：日频 raw 快照 vs 持续性确认状态
+        ALTER TABLE market_regime_daily ADD COLUMN regime_raw TEXT;
+        ALTER TABLE market_regime_daily ADD COLUMN regime_csi800_raw TEXT;
+        ALTER TABLE market_regime_daily ADD COLUMN regime_bucket_csi300_raw TEXT;
+        ALTER TABLE market_regime_daily ADD COLUMN regime_bucket_csi800_raw TEXT;
+    """),
+    (59, """
+        -- P1：L3 推荐质量监控
+        CREATE TABLE IF NOT EXISTS regime_switch_log (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_date          TEXT    NOT NULL,
+            prev_bucket         TEXT,
+            new_bucket          TEXT    NOT NULL,
+            prev_strategy       TEXT,
+            new_strategy        TEXT,
+            bucket_changed      INTEGER NOT NULL DEFAULT 0,
+            strategy_changed    INTEGER NOT NULL DEFAULT 0,
+            confidence          REAL,
+            note                TEXT,
+            created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_rsl_date ON regime_switch_log(trade_date DESC);
+
+        CREATE TABLE IF NOT EXISTS strategy_recommendation_outcomes (
+            trade_date          TEXT    NOT NULL,
+            horizon_days        INTEGER NOT NULL,
+            regime_bucket       TEXT,
+            primary_strategy    TEXT    NOT NULL,
+            confidence          REAL,
+            strategy_return_pct REAL,
+            benchmark_return_pct REAL,
+            excess_return_pct   REAL,
+            hit                 INTEGER,
+            evaluated_at        TEXT,
+            matrix_as_of        TEXT,
+            updated_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (trade_date, horizon_days)
+        );
+        CREATE INDEX IF NOT EXISTS idx_sro_eval ON strategy_recommendation_outcomes(evaluated_at DESC);
+    """),
+    (60, """
+        -- P3-C：HMM 并行 regime（对照层，不替换规则 L1）
+        CREATE TABLE IF NOT EXISTS market_regime_hmm_daily (
+            trade_date          TEXT    PRIMARY KEY,
+            index_code          TEXT    NOT NULL DEFAULT 'sh000906',
+            hmm_state           INTEGER,
+            regime_bucket       TEXT,
+            model_version       TEXT,
+            updated_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_hmm_bucket ON market_regime_hmm_daily(regime_bucket, trade_date DESC);
+    """),
+    (61, """
+        -- P3-D：K-Means / GMM 并行 regime（sklearn 对照层）
+        CREATE TABLE IF NOT EXISTS market_regime_cluster_daily (
+            trade_date          TEXT    NOT NULL,
+            index_code          TEXT    NOT NULL DEFAULT 'sh000906',
+            method              TEXT    NOT NULL,
+            cluster_id          INTEGER,
+            regime_bucket       TEXT,
+            model_version       TEXT,
+            updated_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (trade_date, method)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cluster_bucket
+            ON market_regime_cluster_daily(regime_bucket, method, trade_date DESC);
+    """),
+    (62, """
+        -- P3-E：Jump Model 并行 regime（对照层）
+        CREATE TABLE IF NOT EXISTS market_regime_jump_daily (
+            trade_date          TEXT    PRIMARY KEY,
+            index_code          TEXT    NOT NULL DEFAULT 'sh000906',
+            jump_state          INTEGER,
+            regime_bucket       TEXT,
+            jump_penalty        REAL,
+            backend             TEXT,
+            model_version       TEXT,
+            updated_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_jump_bucket
+            ON market_regime_jump_daily(regime_bucket, trade_date DESC);
+    """),
+    (63, """
+        -- P3-E：Jump Model Walk-Forward λ 时间线
+        CREATE TABLE IF NOT EXISTS jump_lambda_walkforward (
+            trade_date          TEXT    PRIMARY KEY,
+            jump_penalty        REAL    NOT NULL,
+            train_start         TEXT,
+            train_end           TEXT,
+            val_start           TEXT,
+            val_end             TEXT,
+            window_score        REAL,
+            consistency_pct     REAL,
+            dwell_mean          REAL,
+            backend             TEXT,
+            updated_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_jump_lambda_date
+            ON jump_lambda_walkforward(trade_date DESC);
     """),
 ]
 

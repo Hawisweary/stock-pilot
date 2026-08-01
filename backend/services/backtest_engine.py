@@ -18,7 +18,7 @@ from services.trading_rules import (
 )
 from services.strategies.turtle import turtle_atr, turtle_should_exit
 from services.strategy_registry import effective_v5_strategy, normalize_strategy_id
-from services.strategy_selector import compute_backtest_day_scores
+from services.strategy_selector import compute_backtest_day_scores, load_dividend_yield_snap
 from services.v5_score_query import load_score_snap_range, resolve_score_spec
 
 
@@ -125,6 +125,7 @@ def run_backtest(
     }
 
     score_snap: Dict[str, Dict[str, float]] = {}
+    dividend_snap: Dict[str, Dict[str, float]] = {}
     factor_factor_id: Optional[str] = None
     strategy_label = strategy
     score_spec = resolve_score_spec(score_strategy)
@@ -190,6 +191,15 @@ def run_backtest(
     elif strategy == "sector_rotation":
         conn.close()
         strategy_label = "行业轮动"
+    elif strategy == "dividend_defensive":
+        dividend_snap = load_dividend_yield_snap(conn, start_str, end_str)
+        conn.close()
+        strategy_label = "红利防御"
+        if not dividend_snap:
+            return {"error": "红利防御回测无股息率快照，请先同步 valuation_snapshots"}
+    elif strategy == "dual_ma":
+        conn.close()
+        strategy_label = "双均线"
     elif score_spec:
         score_snap = load_score_snap_range(conn, score_spec, start_str, end_str)
         strategy_label = "指数增强" if strategy == "index_enhance" else score_spec.label
@@ -261,6 +271,7 @@ def run_backtest(
                     di,
                     exit_period=turtle_exit_period,
                     stop_price=h.get("stop_price"),
+                    stop_only=True,
                 ):
                     continue
                 quote = quotes.get(code, {}).get(dt, {})
@@ -289,7 +300,12 @@ def run_backtest(
                 del holdings[code]
 
         min_di = lookback if strategy in ("momentum", "turtle") else 1
-        if di % rebalance_every == 0 and di >= min_di:
+        if strategy == "dividend_defensive":
+            min_di = 60
+        elif strategy == "dual_ma":
+            min_di = 20
+
+        if strategy == "turtle" and di >= min_di:
             day_scores = compute_backtest_day_scores(
                 strategy=strategy,
                 quotes=quotes,
@@ -303,6 +319,75 @@ def run_backtest(
                 min_score=min_score,
                 sector_window=sector_window,
                 use_factor_scores=use_factor_scores,
+                dividend_snap=dividend_snap or None,
+                top_n=top_n,
+            )
+            ranked = sorted(day_scores.items(), key=lambda x: -x[1])
+            slots = max(0, top_n - len(holdings))
+            candidates = [c for c, sc in ranked if sc >= min_score and c not in holdings][:slots]
+            if candidates:
+                total_investable = cash + sum(
+                    holdings.get(c, {}).get("shares", 0) * available.get(c, 0) for c in holdings
+                )
+                slot_val = total_investable / top_n if top_n else total_investable
+                for code in candidates:
+                    quote = quotes.get(code, {}).get(dt, {})
+                    if apply_limit_rules and quote and not trade_allowed("buy", quote, prev_closes.get(code)):
+                        continue
+                    price = exec_prices.get(code, available.get(code, 0))
+                    if price <= 0:
+                        continue
+                    exec_price = price * (1 + _slippage) if apply_slippage_cost else price
+                    diff = max(0, int(slot_val / exec_price / 100) * 100)
+                    if diff <= 0:
+                        continue
+                    cost = diff * exec_price
+                    if apply_costs:
+                        cost += cost * commission_rate
+                    if cost > cash:
+                        diff = max(
+                            0,
+                            int(cash / (exec_price * (1 + commission_rate if apply_costs else 0)) / 100)
+                            * 100,
+                        )
+                        cost = diff * exec_price * (1 + commission_rate if apply_costs else 1)
+                    if diff > 0 and cost <= cash:
+                        cash -= cost
+                        atr = turtle_atr(quotes.get(code, {}), dates, di, period=lookback)
+                        holdings[code] = {
+                            "shares": diff,
+                            "cost": exec_price,
+                            "buy_date": dt,
+                            "entry_price": exec_price,
+                            "stop_price": round(exec_price - 2 * atr, 4) if atr and atr > 0 else None,
+                        }
+                        trades.append(
+                            {
+                                "date": dt,
+                                "code": code,
+                                "name": name_map.get(code, ""),
+                                "action": "BUY",
+                                "shares": diff,
+                                "price": round(exec_price, 2),
+                                "reason": "turtle_entry",
+                            }
+                        )
+        elif di % rebalance_every == 0 and di >= min_di:
+            day_scores = compute_backtest_day_scores(
+                strategy=strategy,
+                quotes=quotes,
+                dates=dates,
+                di=di,
+                dt=dt,
+                available=available,
+                score_snap=score_snap,
+                industry_map=industry_map,
+                lookback=lookback,
+                min_score=min_score,
+                sector_window=sector_window,
+                use_factor_scores=use_factor_scores,
+                dividend_snap=dividend_snap or None,
+                top_n=top_n,
             )
 
             ranked = sorted(day_scores.items(), key=lambda x: -x[1])

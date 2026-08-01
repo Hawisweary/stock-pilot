@@ -8,17 +8,45 @@ from __future__ import annotations
 from typing import Any
 
 
+def _parse_legulegu_date(raw: Any) -> str:
+    """乐咕乐股日期字段：新版为 YYYY-MM-DD 字符串，旧版为毫秒时间戳。"""
+    if raw is None:
+        return ""
+    s = str(raw).strip()
+    if not s:
+        return ""
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    try:
+        import pandas as pd
+
+        ts = float(s)
+        if ts > 1e12:
+            ts /= 1000.0
+        return pd.to_datetime(ts, unit="s").strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return s[:10]
+
+
 def fetch_new_high_low_stats() -> list[dict[str, Any]]:
     """全市场创20/60/120日新高新低个股数统计（已剔除停牌股，按日）。"""
-    import akshare as ak
+    import pandas as pd
+    import requests
+    from akshare.utils.cons import headers
 
-    df = ak.stock_a_high_low_statistics(symbol="all")
+    url = "https://www.legulegu.com/stockdata/member-ship/get-high-low-statistics/all"
+    r = requests.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
+    data_json = r.json()
+    df = pd.DataFrame(data_json)
     if df is None or df.empty:
         return []
+    if "indexCode" in df.columns:
+        del df["indexCode"]
     rows = []
     for _, r in df.iterrows():
         rows.append({
-            "trade_date": str(r["date"]),
+            "trade_date": _parse_legulegu_date(r.get("date")),
             "close": float(r["close"]) if r.get("close") is not None else None,
             "high20": int(r["high20"]) if r.get("high20") is not None else None,
             "low20": int(r["low20"]) if r.get("low20") is not None else None,
