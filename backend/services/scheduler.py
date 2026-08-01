@@ -5,7 +5,7 @@ import threading
 import time
 from datetime import datetime
 
-from config import DB_PATH, latest_trading_date
+from config import DATA_DIR, DB_PATH, latest_trading_date
 
 logger = logging.getLogger(__name__)
 
@@ -19,47 +19,55 @@ _STATE_KEYS = {
 }
 
 
-def _ensure_state_table(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS scheduler_state (
-            key TEXT PRIMARY KEY,
-            value TEXT,
-            updated_at TEXT DEFAULT (datetime('now', 'localtime'))
-        )"""
-    )
+import json
+import os
+
+_STATE_FILE = os.path.join(DATA_DIR, "scheduler_state.json")
+
+
+def _write_state_file(state: dict) -> None:
+    tmp = _STATE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+    os.replace(tmp, _STATE_FILE)  # 原子替换,避免半截文件
 
 
 def _load_state() -> dict[str, str]:
-    """启动时从 DB 加载各触发点的最近执行日期；表不存在则创建。"""
-    conn = sqlite3.connect(DB_PATH)
+    """从 JSON 文件加载触发点执行日期。与主库锁解耦:批任务持锁数分钟也不影响状态读写,
+    彻底断掉"状态存不下→任务每次重启重跑→再持锁"的死循环。文件缺失时一次性从旧 DB 表迁移。"""
     try:
-        _ensure_state_table(conn)
-        conn.commit()
-        rows = conn.execute("SELECT key, value FROM scheduler_state").fetchall()
-        return {k: v or "" for k, v in rows}
+        if os.path.isfile(_STATE_FILE):
+            with open(_STATE_FILE, encoding="utf-8") as f:
+                return {str(k): str(v or "") for k, v in json.load(f).items()}
     except Exception as e:
-        logger.warning("[Scheduler] 加载调度状态失败(按空状态继续): %s", e)
+        logger.warning("[Scheduler] 读状态文件失败(按空继续): %s", e)
+    # 迁移:旧 scheduler_state 表 → 文件(仅首次,拿不到锁就算了下次再迁)
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        try:
+            rows = conn.execute("SELECT key, value FROM scheduler_state").fetchall()
+            st = {k: v or "" for k, v in rows}
+            if st:
+                _write_state_file(st)
+            return st
+        finally:
+            conn.close()
+    except Exception:
         return {}
-    finally:
-        conn.close()
 
 
 def _save_state(key: str, value: str) -> None:
-    """持久化触发点执行日期；失败只记日志，不影响调度线程。"""
+    """持久化触发点执行日期到 JSON 文件(不碰 DB→批任务持锁也能落地)；失败只记日志。"""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=30)
-        try:
-            _ensure_state_table(conn)
-            conn.execute(
-                """INSERT INTO scheduler_state (key, value, updated_at)
-                   VALUES (?, ?, datetime('now', 'localtime'))
-                   ON CONFLICT(key) DO UPDATE SET
-                     value=excluded.value, updated_at=excluded.updated_at""",
-                (key, value),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        state: dict = {}
+        if os.path.isfile(_STATE_FILE):
+            try:
+                with open(_STATE_FILE, encoding="utf-8") as f:
+                    state = json.load(f)
+            except Exception:
+                state = {}
+        state[key] = value
+        _write_state_file(state)
     except Exception as e:
         logger.warning("[Scheduler] 保存调度状态失败 %s=%s: %s", key, value, e)
 

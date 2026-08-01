@@ -68,6 +68,17 @@ def _load_code_map(conn: sqlite3.Connection) -> tuple[dict[str, int], dict[str, 
     return ts_to_id, ts_to_code
 
 
+def _bound_wal(conn: sqlite3.Connection, i: int, every: int = 8) -> None:
+    """长批任务每 every 次提交后主动 TRUNCATE checkpoint,防止 WAL 撑爆(见 wal_unbounded_growth):
+    per-day commit 只是让事务变短,但被动 checkpoint 常被后端读快照阻塞,WAL 仍会涨到 GB 级。
+    这里趁 tushare API/节流的写空档主动收回;拿不到锁就 no-op,下轮再试。TRUNCATE 返回行不抛异常。"""
+    if (i + 1) % every == 0:
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
+
+
 def backfill_quotes(conn: sqlite3.Connection, ts_to_id: dict[str, int], days: int) -> dict:
     end = date.today().strftime("%Y%m%d")
     start = (date.today() - timedelta(days=int(days * 1.6) + 10)).strftime("%Y%m%d")  # 多留缓冲跳过非交易日
@@ -110,6 +121,7 @@ def backfill_quotes(conn: sqlite3.Connection, ts_to_id: dict[str, int], days: in
             )
             conn.commit()
             total_rows += len(rows)
+        _bound_wal(conn, i)
         print(f"  [{i+1}/{len(trading_days)}] {d}: {len(rows)} 只")
     return {"trading_days": len(trading_days), "rows": total_rows}
 
@@ -169,6 +181,7 @@ def backfill_financials(conn: sqlite3.Connection, ts_to_id: dict[str, int], year
                 ind_rows,
             )
         conn.commit()
+        _bound_wal(conn, i, every=4)
         total_fin += len(fin_rows)
         total_ind += len(ind_rows)
         print(f"  [{i+1}/{len(periods)}] {period}: fin={len(fin_rows)} indicators={len(ind_rows)}")
@@ -205,6 +218,7 @@ def backfill_fund_flow(conn: sqlite3.Connection, ts_to_id: dict[str, int], days:
             )
             conn.commit()
             total_rows += len(rows)
+        _bound_wal(conn, i)
         print(f"  [{i+1}/{len(trading_days)}] {d}: {len(rows)} 只")
 
     # 滚动算 main_net_5d（近5个交易日主力净流入汇总）—— capital_tier_v5 读的是这个
@@ -286,6 +300,7 @@ def backfill_suspend(conn: sqlite3.Connection, ts_to_id: dict[str, int], days: i
             )
             conn.commit()
             total_marked += len(stock_ids)
+        _bound_wal(conn, i)
         print(f"  [{i+1}/{len(trading_days)}] {d}: {len(stock_ids)} 只停牌")
     return {"trading_days": len(trading_days), "marked": total_marked}
 
@@ -341,6 +356,8 @@ def main() -> None:
     conn = sqlite3.connect(config.DB_PATH, timeout=60)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=60000")
+    conn.execute("PRAGMA synchronous=NORMAL")     # WAL 下安全且更快
+    conn.execute("PRAGMA wal_autocheckpoint=800")  # 被动 checkpoint 阈值下调,配合 _bound_wal 主动收回
     ts_to_id, _ = _load_code_map(conn)
     print(f"本地活跃股票: {len(ts_to_id)} 只\n")
 
@@ -366,6 +383,11 @@ def main() -> None:
         summary["sector_fund_flow"] = backfill_sector_fund_flow(conn)
         print()
 
+    # 收尾:强制 TRUNCATE 收回 WAL,别把大 WAL 留给后端连接(拿不到锁不阻断退出)
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception:
+        pass
     conn.close()
     elapsed = time.perf_counter() - t0
     print(f"全部完成，耗时 {elapsed/60:.1f}min")
