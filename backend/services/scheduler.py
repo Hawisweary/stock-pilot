@@ -193,13 +193,18 @@ def start_scheduler(app):
                 and state.get(_STATE_KEYS["morning_tasks"]) != today_key
             ):
                 logger.info("[Scheduler] %s 触发开盘执行任务(子进程)...", datetime.now().strftime("%H:%M"))
+                morning_locked = False
                 try:
                     out = _run_job_subprocess("morning", timeout_sec=1800)
                     logger.info("[Scheduler] 开盘执行任务(子进程): %s", out)
                 except Exception as e:
                     logger.warning("[Scheduler] run_morning_tasks failed: %s", e)
-                state[_STATE_KEYS["morning_tasks"]] = today_key
-                _save_state(_STATE_KEYS["morning_tasks"], today_key)
+                    # 锁类失败=瞬态(nightly/批任务持写锁)→ 不落 done 标记,下轮(30s)重试直到锁释放。
+                    # 否则一次撞锁就被标记完成、当天永不再执行——开盘建仓/调仓永久不落地的元凶。
+                    morning_locked = "locked" in str(e).lower()
+                if not morning_locked:
+                    state[_STATE_KEYS["morning_tasks"]] = today_key
+                    _save_state(_STATE_KEYS["morning_tasks"], today_key)
             if (
                 now_minutes >= 15 * 60 + 30
                 and state.get(_STATE_KEYS["daily_tasks"]) != today_key
