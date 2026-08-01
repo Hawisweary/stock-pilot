@@ -39,11 +39,12 @@ def turtle_should_exit(
     *,
     exit_period: int = 10,
     stop_price: Optional[float] = None,
+    stop_only: bool = False,
 ) -> bool:
     """
-    出场：收盘价跌破 exit_period 日低点通道，或跌破 2N 止损价。
+    出场：收盘价跌破 2N 止损价；stop_only=True 时仅检查止损（不做通道出场）。
     """
-    if idx < exit_period or idx >= len(dates):
+    if idx < 1 or idx >= len(dates):
         return False
     dt = dates[idx]
     if dt not in series:
@@ -53,6 +54,10 @@ def turtle_should_exit(
         return False
     if stop_price is not None and close < stop_price:
         return True
+    if stop_only:
+        return False
+    if idx < exit_period:
+        return False
     prior = dates[idx - exit_period : idx]
     lows: list[float] = []
     for d in prior:

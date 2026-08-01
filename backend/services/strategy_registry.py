@@ -7,7 +7,7 @@ from typing import Literal
 from services.v5_scorer import V5_LABELS
 from services.v5_score_query import STRATEGY_ALIASES, resolve_score_spec
 
-StrategyKind = Literal["v5", "momentum", "factor", "combo", "turtle", "sector"]
+StrategyKind = Literal["v5", "momentum", "factor", "combo", "turtle", "sector", "defensive"]
 
 
 @dataclass(frozen=True)
@@ -63,8 +63,27 @@ STRATEGIES: dict[str, StrategyMeta] = {
         portfolio_ready=True,
         default_top_n=10,
         default_rebalance="weekly",
+        default_min_score=1.0,
+        factor_id="F031",
+    ),
+    "reversal": StrategyMeta(
+        id="reversal",
+        label="反转策略",
+        kind="factor",
+        portfolio_ready=True,
+        default_top_n=10,
+        default_rebalance="weekly",
         default_min_score=0.0,
-        factor_id="F013",
+        factor_id="F020",
+    ),
+    "dividend_defensive": StrategyMeta(
+        id="dividend_defensive",
+        label="红利防御",
+        kind="defensive",
+        portfolio_ready=True,
+        default_top_n=15,
+        default_rebalance="monthly",
+        default_min_score=55.0,
     ),
     "factor_combination": StrategyMeta(
         id="factor_combination",
@@ -91,7 +110,7 @@ STRATEGIES: dict[str, StrategyMeta] = {
         kind="turtle",
         portfolio_ready=True,
         default_top_n=5,
-        default_rebalance="weekly",
+        default_rebalance="none",
         default_min_score=60.0,
     ),
     "sector_rotation": StrategyMeta(
@@ -207,6 +226,8 @@ def list_strategies(*, portfolio_only: bool = False) -> list[dict]:
         "index_enhance",
         "momentum",
         "dual_ma",
+        "reversal",
+        "dividend_defensive",
         "turtle",
         "sector_rotation",
         "factor_combination",

@@ -23,9 +23,10 @@ def select_sector_rotation(
     if sig.get("error"):
         return [], [], [], str(sig["error"])
 
-    add_sectors = sig.get("add") or []
+    add_sectors = [s for s in (sig.get("add") or []) if s.get("signal") == "加仓"]
     reduce_sectors = sig.get("reduce") or []
     reduce_inds = [s["industry"] for s in reduce_sectors]
+    crowding_warnings = sig.get("crowding_warnings") or []
 
     candidates: list[dict] = []
     for sec in add_sectors[:5]:
@@ -43,7 +44,10 @@ def select_sector_rotation(
                 )
 
     if not candidates:
-        return [], [], reduce_inds, "无加仓行业候选股"
+        err = "无加仓行业候选股"
+        if crowding_warnings:
+            err += f"（{len(crowding_warnings)} 个行业因拥挤度预警被过滤）"
+        return [], [], reduce_inds, err
 
     candidates.sort(key=lambda x: -float(x["score"]))
     seen: set[str] = set()
