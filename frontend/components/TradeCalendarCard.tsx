@@ -98,8 +98,8 @@ export function TradeCalendarCard() {
                   d.is_open
                     ? isToday
                       ? "bg-primary text-primary-foreground font-semibold"
-                      : "bg-green-50 text-green-700"
-                    : "bg-gray-50 text-gray-400"
+                      : "bg-green-500/15 text-green-700 dark:text-green-400"
+                    : "bg-muted/50 text-muted-foreground"
                 }`}
               >
                 {Number(d.date.slice(-2))}
@@ -109,8 +109,8 @@ export function TradeCalendarCard() {
         </div>
         {loading && <p className="text-xs text-muted-foreground mt-2">加载中...</p>}
         <p className="text-[10px] text-muted-foreground mt-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1" />交易日
-          <span className="inline-block w-2 h-2 rounded-full bg-gray-300 mx-1 ml-3" />休市
+          <span className="inline-block w-2 h-2 rounded-full bg-green-500/70 mr-1" />交易日
+          <span className="inline-block w-2 h-2 rounded-full bg-muted-foreground/30 mx-1 ml-3" />休市
         </p>
       </CardContent>
     </Card>

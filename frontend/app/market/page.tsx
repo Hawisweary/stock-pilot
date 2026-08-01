@@ -4,113 +4,24 @@ import { useState, useCallback } from "react";
 import { Activity, RefreshCw } from "lucide-react";
 import { syncWatchlistQuotes } from "@/lib/market";
 import { useToast } from "@/lib/useToast";
-import dynamic from "next/dynamic";
-
-const LimitStatsCard = dynamic(
-  () => import("@/components/LimitStatsCard").then(m => ({ default: m.LimitStatsCard })),
-  {
-    loading: () => (
-      <div className="rounded-lg border border-border bg-card h-[240px] flex items-center justify-center">
-        <div className="animate-pulse space-y-3 w-[80%]">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="h-16 bg-muted rounded" />
-            <div className="h-16 bg-muted rounded" />
-          </div>
-          <div className="h-4 bg-muted rounded w-2/3 mx-auto" />
-        </div>
-      </div>
-    ),
-  }
-);
-
-const MarketIndexCard = dynamic(
-  () => import("@/components/MarketIndexCard").then(m => ({ default: m.MarketIndexCard })),
-  {
-    loading: () => (
-      <div className="lg:col-span-2 rounded-lg border border-border bg-card h-[200px] animate-pulse" />
-    ),
-    ssr: false,
-  }
-);
-
-const MarketIndexKlinePanel = dynamic(
-  () =>
-    import("@/components/MarketIndexKlinePanel").then((m) => ({
-      default: m.MarketIndexKlinePanel,
-    })),
-  {
-    loading: () => (
-      <div className="rounded-lg border border-border bg-card h-[420px] animate-pulse" />
-    ),
-    ssr: false,
-  }
-);
-
-const MacroIndicatorsPanel = dynamic(
-  () => import("@/components/MacroIndicatorsPanel").then((m) => ({ default: m.MacroIndicatorsPanel })),
-  { loading: () => <div className="rounded-lg border h-40 animate-pulse" />, ssr: false },
-);
-
-const SectorRotationCard = dynamic(
-  () => import("@/components/SectorRotationCard").then((m) => ({ default: m.SectorRotationCard })),
-  { loading: () => <div className="rounded-lg border h-32 animate-pulse" />, ssr: false },
-);
-
-const DragonTigerCard = dynamic(
-  () => import("@/components/DragonTigerCard").then((m) => ({ default: m.DragonTigerCard })),
-  { loading: () => <div className="rounded-lg border h-48 animate-pulse" />, ssr: false },
-);
-
-const ThsHotspotsCard = dynamic(
-  () => import("@/components/ThsHotspotsCard").then((m) => ({ default: m.ThsHotspotsCard })),
-  { loading: () => <div className="rounded-lg border h-24 animate-pulse" />, ssr: false },
-);
-
-const HsgtTop10Card = dynamic(
-  () => import("@/components/HsgtTop10Card").then((m) => ({ default: m.HsgtTop10Card })),
-  { loading: () => <div className="rounded-lg border h-48 animate-pulse" />, ssr: false },
-);
-
-const CapitalResonanceCard = dynamic(
-  () => import("@/components/CapitalResonanceCard").then((m) => ({ default: m.CapitalResonanceCard })),
-  { loading: () => <div className="rounded-lg border h-48 animate-pulse" />, ssr: false },
-);
-
-const MarketOpsButtons = dynamic(
-  () => import("@/components/MarketOpsButtons").then((m) => ({ default: m.MarketOpsButtons })),
-  { ssr: false },
-);
-
-const IndustryBoardsCard = dynamic(
-  () => import("@/components/IndustryBoardsCard").then(m => ({ default: m.IndustryBoardsCard })),
-  {
-    loading: () => (
-      <div className="rounded-lg border border-border bg-card flex items-center justify-center p-8">
-        <div className="animate-pulse space-y-2 w-full max-w-[600px]">
-          {[1, 2, 3, 4, 5, 6].map(i => (
-            <div key={i} className="h-6 bg-muted rounded" style={{ width: `${85 - i * 5}%` }} />
-          ))}
-        </div>
-      </div>
-    ),
-    ssr: false, // 避免 SSR 时请求数据
-  }
-);
-
-const TradeCalendarCard = dynamic(
-  () => import("@/components/TradeCalendarCard").then((m) => ({ default: m.TradeCalendarCard })),
-  { loading: () => <div className="rounded-lg border h-64 animate-pulse" />, ssr: false },
-);
-
-const MarketRegimeCard = dynamic(
-  () => import("@/components/MarketRegimeCard").then((m) => ({ default: m.MarketRegimeCard })),
-  { loading: () => <div className="rounded-lg border h-48 animate-pulse" />, ssr: false },
-);
-
-const MarketBreadthCard = dynamic(
-  () => import("@/components/MarketBreadthCard").then((m) => ({ default: m.MarketBreadthCard })),
-  { loading: () => <div className="rounded-lg border h-48 animate-pulse" />, ssr: false },
-);
+import { LimitStatsCard } from "@/components/LimitStatsCard";
+import { MarketIndexCard } from "@/components/MarketIndexCard";
+import { MarketIndexKlinePanel } from "@/components/MarketIndexKlinePanel";
+import { MacroIndicatorsPanel } from "@/components/MacroIndicatorsPanel";
+import { SectorRotationCard } from "@/components/SectorRotationCard";
+import { DragonTigerCard } from "@/components/DragonTigerCard";
+import { ThsHotspotsCard } from "@/components/ThsHotspotsCard";
+import { HsgtTop10Card } from "@/components/HsgtTop10Card";
+import { CapitalResonanceCard } from "@/components/CapitalResonanceCard";
+import { MarketOpsButtons } from "@/components/MarketOpsButtons";
+import { IndustryBoardsCard } from "@/components/IndustryBoardsCard";
+import { TradeCalendarCard } from "@/components/TradeCalendarCard";
+import { MarketRegimeTimelineCard } from "@/components/MarketRegimeTimelineCard";
+import { MarketRegimeCard } from "@/components/MarketRegimeCard";
+import { RegimeLayersCompareCard } from "@/components/RegimeLayersCompareCard";
+import { RegimeValidationCard } from "@/components/RegimeValidationCard";
+import { StrategyRegimeMatrixCard } from "@/components/StrategyRegimeMatrixCard";
+import { MarketBreadthCard } from "@/components/MarketBreadthCard";
 
 export default function MarketPage() {
   const toast = useToast();
@@ -132,11 +43,10 @@ export default function MarketPage() {
       new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     );
     setTimeout(() => setRefreshing(false), 1200);
-  }, []);
+  }, [toast]);
 
   return (
     <div className="space-y-6">
-      {/* 页面标题 */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -163,18 +73,11 @@ export default function MarketPage() {
         </button>
       </div>
 
-      {/* 大盘指数 */}
       <MarketIndexCard refreshKey={refreshKey} />
-
-      {/* 大盘 K 线 */}
       <MarketIndexKlinePanel refreshKey={refreshKey} />
-
       <LimitStatsCard refreshKey={refreshKey} />
-
       <DragonTigerCard refreshKey={refreshKey} />
-
       <HsgtTop10Card />
-
       <CapitalResonanceCard />
 
       <MarketOpsButtons
@@ -187,7 +90,20 @@ export default function MarketPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <MacroIndicatorsPanel refreshKey={refreshKey} />
         <div className="space-y-4">
+          <div className="pt-1">
+            <h2 className="text-sm font-semibold tracking-tight">市场状态 · Regime</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              四格划分、策略矩阵与验证报告（L1→L3 研究视图）
+            </p>
+          </div>
+          <MarketRegimeTimelineCard />
           <MarketRegimeCard />
+          <RegimeLayersCompareCard />
+          <StrategyRegimeMatrixCard />
+          <RegimeValidationCard />
+          <div className="pt-2 border-t border-border">
+            <h2 className="text-sm font-semibold tracking-tight">行业与热点</h2>
+          </div>
           <SectorRotationCard refreshKey={refreshKey} />
           <ThsHotspotsCard refreshKey={refreshKey} />
           <TradeCalendarCard />
@@ -195,7 +111,6 @@ export default function MarketPage() {
         </div>
       </div>
 
-      {/* 行业板块全表 */}
       <IndustryBoardsCard refreshKey={refreshKey} />
     </div>
   );

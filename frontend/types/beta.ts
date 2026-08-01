@@ -84,7 +84,9 @@ export const BACKTEST_PRESETS: BacktestPreset[] = [
   { id: "momentum-lab", label: "动量实验", params: { strategy: "momentum", top_n: 5, days: 60, lookback: 20, rebalance: "weekly" } },
   { id: "index-enhance", label: "指数增强 Top15", params: { strategy: "index_enhance", top_n: 15, days: 120, rebalance: "monthly", min_score: 50, benchmark_mode: "csi300" } },
   { id: "dual-ma", label: "双均线 F013", params: { strategy: "F013", top_n: 10, days: 90, rebalance: "weekly", min_score: 0 } },
-  { id: "turtle", label: "海龟 20日突破", params: { strategy: "turtle", top_n: 5, days: 90, lookback: 20, rebalance: "weekly", min_score: 60 } },
+  { id: "reversal", label: "反转 Top10", params: { strategy: "reversal", top_n: 10, days: 90, rebalance: "weekly", min_score: 0 } },
+  { id: "dividend-def", label: "红利防御 Top15", params: { strategy: "dividend_defensive", top_n: 15, days: 120, rebalance: "monthly", min_score: 55 } },
+  { id: "turtle", label: "海龟 20日突破", params: { strategy: "turtle", top_n: 5, days: 90, lookback: 20, rebalance: "none", min_score: 60 } },
   { id: "sector-rot", label: "行业轮动", params: { strategy: "sector_rotation", top_n: 10, days: 120, rebalance: "monthly", min_score: 0, sector_window: 5 } },
 ];
 

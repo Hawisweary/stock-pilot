@@ -103,6 +103,25 @@ export function IndustryBoardsCard({ refreshKey = 0 }: { refreshKey?: number }) 
     );
   }
 
+  if (data && data.total === 0) {
+    return (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-base">行业板块涨跌幅</CardTitle>
+          <button onClick={() => load(true)} className="text-muted-foreground hover:text-foreground transition-colors">
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            板块数据暂不可用（Tushare 当日数据可能尚未发布），请点击刷新重试
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Gauge, TrendingUp, TrendingDown, Activity, Droplets, Waves } from "lucide-react";
+import { Gauge, TrendingUp, TrendingDown, Activity, Droplets, Waves, AlertTriangle } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface RegimeGuidance {
@@ -14,10 +14,35 @@ interface RegimeGuidance {
   note: string;
 }
 
+interface RegimeIndexSnapshot {
+  index_code: string;
+  index_name: string;
+  regime: string;
+  regime_label: string;
+  regime_bucket?: string;
+  regime_bucket_label?: string;
+  rsi_14?: number;
+  volatility_20?: number;
+  adx?: number;
+  return_20d?: number;
+  price_vs_ma60?: number;
+}
+
 export interface MarketRegimeData {
   trade_date?: string;
   regime?: string;
   regime_label?: string;
+  regime_csi300?: string;
+  regime_csi300_label?: string;
+  regime_csi800?: string;
+  regime_csi800_label?: string;
+  primary_index?: string;
+  primary_regime?: string;
+  primary_regime_label?: string;
+  primary_regime_bucket_label?: string;
+  regime_label_agreement?: boolean;
+  regime_bucket_agreement?: boolean;
+  indices?: RegimeIndexSnapshot[];
   rsi_14?: number;
   volatility_20?: number;
   ad_ratio?: number;
@@ -49,6 +74,30 @@ function fmtPct(v: number | undefined, digits = 1) {
 function fmtNum(v: number | undefined, digits = 1) {
   if (v == null || Number.isNaN(v)) return "—";
   return v.toFixed(digits);
+}
+
+function RegimeBadge({ snapshot }: { snapshot: RegimeIndexSnapshot }) {
+  const regime = snapshot.regime || "oscillation";
+  const style = REGIME_STYLE[regime] || REGIME_STYLE.oscillation;
+  const Icon = style.icon;
+  return (
+    <div className="rounded-md border bg-card/50 p-2.5 space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-medium text-muted-foreground">{snapshot.index_name}</span>
+        <div className={`rounded p-1 ${style.className}`}>
+          <Icon className="h-3.5 w-3.5" />
+        </div>
+      </div>
+      <div className="font-semibold text-sm">{snapshot.regime_label}</div>
+      {snapshot.regime_bucket_label && (
+        <div className="text-[10px] text-muted-foreground">四格：{snapshot.regime_bucket_label}</div>
+      )}
+      <div className="grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
+        <span>波动 {fmtPct(snapshot.volatility_20)}</span>
+        <span>RSI {fmtNum(snapshot.rsi_14, 0)}</span>
+      </div>
+    </div>
+  );
 }
 
 export function MarketRegimeCard({ compact = false }: { compact?: boolean }) {
@@ -92,17 +141,20 @@ export function MarketRegimeCard({ compact = false }: { compact?: boolean }) {
     );
   }
 
-  const regime = data.regime || "oscillation";
-  const style = REGIME_STYLE[regime] || REGIME_STYLE.oscillation;
+  const indices = data.indices ?? [];
+  const primaryLabel = data.primary_regime_label || data.regime_label || "震荡";
+  const primaryRegime = data.primary_regime || data.regime || "oscillation";
+  const style = REGIME_STYLE[primaryRegime] || REGIME_STYLE.oscillation;
   const Icon = style.icon;
-  const label = data.regime_label || data.guidance?.regime_label || regime;
   const guidance = data.guidance;
+  const disagree = data.regime_label_agreement === false;
 
   return (
     <Card>
       <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
         <CardTitle className="text-sm flex items-center gap-2">
           <Gauge className="h-4 w-4" /> 市场状态
+          <span className="text-[10px] font-normal text-muted-foreground">双轨</span>
         </CardTitle>
         {data.trade_date && (
           <span className="text-[10px] text-muted-foreground font-mono">{data.trade_date}</span>
@@ -114,7 +166,13 @@ export function MarketRegimeCard({ compact = false }: { compact?: boolean }) {
             <Icon className="h-5 w-5" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="font-semibold text-base">{label}</div>
+            <div className="text-[10px] text-muted-foreground">推荐基准 · 中证800</div>
+            <div className="font-semibold text-base">{primaryLabel}</div>
+            {data.primary_regime_bucket_label && (
+              <div className="text-[11px] text-muted-foreground mt-0.5">
+                四格分类：{data.primary_regime_bucket_label}
+              </div>
+            )}
             {guidance && (
               <div className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
                 建议仓位 ≤ {Math.round(guidance.max_position * 100)}% · {guidance.note}
@@ -122,11 +180,28 @@ export function MarketRegimeCard({ compact = false }: { compact?: boolean }) {
             )}
             {data.weight_note && (
               <div className="text-[10px] text-primary/80 mt-1">
-                V5 权重：{data.weight_note}
+                V5 权重（沪深300口径）：{data.weight_note}
               </div>
             )}
           </div>
         </div>
+
+        {!compact && indices.length >= 2 && (
+          <div className="grid grid-cols-2 gap-2">
+            {indices.map((snap) => (
+              <RegimeBadge key={snap.index_code} snapshot={snap} />
+            ))}
+          </div>
+        )}
+
+        {disagree && (
+          <div className="flex items-start gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-800 dark:text-amber-300">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span>
+              沪深300 与 中证800 判断不一致，可能存在大小盘风格分化；策略推荐将以中证800 为准。
+            </span>
+          </div>
+        )}
 
         <div className={`grid gap-2 text-center text-xs ${compact ? "grid-cols-2" : "grid-cols-4"}`}>
           <Metric label="RSI(14)" value={fmtNum(data.rsi_14, 0)} />

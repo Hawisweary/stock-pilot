@@ -88,7 +88,7 @@
         fetch(FRONTEND + "/", { mode: "no-cors", cache: "no-store" })
           .then(function () {
             statusEl.textContent = "Loading interface";
-            window.location.replace(FRONTEND);
+            window.location.replace(FRONTEND + "/?_=" + Date.now());
           })
           .catch(function () {
             if (tries < 150) {

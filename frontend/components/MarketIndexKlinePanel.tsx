@@ -1,27 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import dynamic from "next/dynamic";
 import { AlertCircle, CandlestickChart, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { KLineChart } from "@/components/KLineChart";
 import {
   fetchMarketIndexKline,
   MARKET_INDEX_OPTIONS,
   type IndexKlineBar,
   type MarketIndexCode,
 } from "@/lib/market";
-
-const KLineChart = dynamic(
-  () => import("@/components/KLineChart").then((m) => ({ default: m.KLineChart })),
-  {
-    loading: () => (
-      <div className="h-[360px] rounded-lg bg-muted/40 animate-pulse flex items-center justify-center text-xs text-muted-foreground">
-        加载 K 线…
-      </div>
-    ),
-    ssr: false,
-  },
-);
 
 type Period = "daily" | "weekly";
 

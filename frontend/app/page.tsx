@@ -1,38 +1,56 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StockCard } from "@/components/StockCard";
-import { MarketIndexCard } from "@/components/MarketIndexCard";
-import { ThsHotspotsCard } from "@/components/ThsHotspotsCard";
-import { MacroIndicatorsPanel } from "@/components/MacroIndicatorsPanel";
-import { SectorRotationCard } from "@/components/SectorRotationCard";
-import { MarketOpsButtons } from "@/components/MarketOpsButtons";
 import { api, DashboardOverview, clearCache, pollFetchUntilDone, V5_RECALC_EVENT, getV5RecalcTimestamp, postSparkline, SparklineSeries, V5MarketScope, V5_MARKET_SCOPES } from "@/lib/api"
 import { ScoreSparkline } from "@/components/ScoreSparkline";
-import { DataHealthCard } from "@/components/DataHealthCard";
 import { ScoreAlertCard } from "@/components/ScoreAlertCard";
 import { UpcomingEarningsCard } from "@/components/UpcomingEarningsCard";
 import { PortfolioPnlCard } from "@/components/PortfolioPnlCard";
-import { MarketRegimeCard } from "@/components/MarketRegimeCard";
+import { StrategyRecommendationCard } from "@/components/StrategyRecommendationCard";
 import { exportCsv } from "@/lib/csvExport";
 import { scoreTextClass } from "@/lib/scoreColors";
 import { useToast } from "@/lib/useToast";
-import { RefreshCw, Bot, FileText, Flame, Landmark, Rocket, Trophy, NotebookPen } from "lucide-react";
+import { RefreshCw, Bot, FileText, Landmark, Rocket, Trophy, ChevronRight } from "lucide-react";
 import { Skeleton, ErrorState, StatTile } from "@/components/ui/data-ui";
+
+const V5_RANK_PREVIEW = 10;
+
+function DashboardSection({
+  title,
+  hint,
+  action,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-2 border-b border-border pb-2">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+          {hint && <span className="text-[10px] text-muted-foreground truncate">{hint}</span>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
 
 export default function DashboardPage() {
   const toast = useToast();
   const router = useRouter();
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
-  const [quality, setQuality] = useState<any>(null);
   const [macro, setMacro] = useState<any>(null);
-  const [review, setReview] = useState<any>(null);
-  const [hotspots, setHotspots] = useState<any>(null);
-  const [thsHot, setThsHot] = useState<any>(null);
   const [mlTop, setMlTop] = useState<
     { code: string; name: string; score: number; model_version?: string; is_demo?: boolean }[]
   >([]);
@@ -41,11 +59,11 @@ export default function DashboardPage() {
   const [v5Scope, setV5Scope] = useState<V5MarketScope>("A");
   const [v5ScopeLabel, setV5ScopeLabel] = useState("全部 A 股");
   const [sparklines, setSparklines] = useState<SparklineSeries>({});
+  const [showAllRank, setShowAllRank] = useState(false);
   const lastV5TsRef = useRef(0);
   const [rankSortKey, setRankSortKey] = useState("score");
   const [rankSortDir, setRankSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
-  const [macroKey, setMacroKey] = useState(0);
 
   // 排序后的排名数据
   const sortedRank = [...v5Rank].sort((a, b) => {
@@ -53,6 +71,7 @@ export default function DashboardPage() {
     const vb = (b as unknown as Record<string, unknown>)[rankSortKey] ?? 0;
     return rankSortDir === "desc" ? Number(vb) - Number(va) : Number(va) - Number(vb);
   });
+  const rankDisplay = showAllRank ? sortedRank : sortedRank.slice(0, V5_RANK_PREVIEW);
   const avgV5 =
     v5Rank.length > 0
       ? v5Rank.reduce((s, r) => s + (r.score ?? r.composite_v5 ?? 0), 0) / v5Rank.length
@@ -93,21 +112,13 @@ export default function DashboardPage() {
 
     void (async () => {
       try {
-        const [mlRes, v5Batch, qRes, mRes, revRes, hotRes, thsRes] = await Promise.all([
+        const [mlRes, v5Batch, mRes] = await Promise.all([
           api.mlTop(8).catch(() => ({ enabled: false, predictions: [] as { code: string; name: string; score: number }[] })),
           api.getV5ScoresBatch({ scope: v5Scope }).catch(() => ({ scores: [] as import("@/lib/api").V5ScoreRow[], calc_date: null as string | null, scope_label: "" })),
-          fetch("/api/fusion/quality").then((r) => (r.ok ? r.json() : null)).catch(() => null),
           fetch("/api/macro/score").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-          fetch("/api/review/latest").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-          fetch("/api/hotspots").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-          fetch("/api/signals/hotspots").then((r) => (r.ok ? r.json() : null)).catch(() => null),
         ]);
         setMlTop(mlRes.enabled ? (mlRes.predictions || []) : []);
-        if (qRes) setQuality(qRes);
         if (mRes) setMacro(mRes);
-        setReview(revRes?.review || null);
-        if (hotRes) setHotspots(hotRes);
-        setThsHot(thsRes?.hotspots || []);
         const scores = v5Batch.scores || [];
         setV5Rank(scores);
         setV5CalcDate(v5Batch.calc_date ?? null);
@@ -224,15 +235,19 @@ export default function DashboardPage() {
   if (!overview) return <ErrorState message="Dashboard 加载失败" onRetry={loadData} />;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-center justify-between border-b border-border pb-3">
         <div className="flex items-baseline gap-3">
           <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
-          <Badge variant={overview.stale_stocks > 0 ? "destructive" : "outline"} className="text-[11px]">
-            {overview.stale_stocks > 0
-              ? `${overview.stale_stocks} 只数据逾期`
-              : "数据正常"}
-          </Badge>
+          {overview.stale_stocks > 0 ? (
+            <Link href="/data-quality">
+              <Badge variant="destructive" className="text-[11px] hover:opacity-90">
+                {overview.stale_stocks} 只数据逾期
+              </Badge>
+            </Link>
+          ) : (
+            <Badge variant="outline" className="text-[11px]">数据正常</Badge>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-muted-foreground font-mono">
@@ -251,7 +266,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 顶部状态条：宏观 / V5均分 / 数据状态 — 硬化分区,色彩只落在数值 */}
       <div className="grid grid-cols-3 divide-x divide-border rounded-md border border-border bg-card">
         <StatTile
           label="宏观环境"
@@ -273,24 +287,23 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* 预警 + 财报日历 + 持仓盈亏 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <ScoreAlertCard />
-        <UpcomingEarningsCard />
-        <PortfolioPnlCard />
-      </div>
+      <DashboardSection
+        title="今日决策"
+        hint="策略推荐 · 预警 · 持仓"
+        action={
+          <Link href="/market" className="text-[11px] text-primary hover:underline flex items-center gap-0.5 shrink-0">
+            市场环境 <ChevronRight className="h-3 w-3" />
+          </Link>
+        }
+      >
+        <StrategyRecommendationCard />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <ScoreAlertCard />
+          <UpcomingEarningsCard />
+          <PortfolioPnlCard />
+        </div>
+      </DashboardSection>
 
-      {/* 市场状态（独立一行，不挤占原有三卡布局） */}
-      <MarketRegimeCard compact />
-
-      {/* U2-3: 数据健康看板 */}
-      <DataHealthCard
-        staleCount={overview.stale_stocks ?? 0}
-        staleList={overview.stale_stock_list ?? []}
-        dataQuality={overview.data_quality}
-        onRefreshed={loadData}
-      />
-      {/* 刷新进度 */}
       {refreshMsg && (
         <div className={`rounded-md p-3 flex items-center gap-2 text-sm border ${
           refreshMsg.includes("失败") || refreshMsg.includes("超时") ? "bg-destructive/10 border-destructive/20 text-destructive" :
@@ -302,8 +315,55 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 大盘指数（技术面评分参考环境） */}
-      <MarketIndexCard compact />
+      {sortedRank.length > 0 && (() => {
+        const momentumRank = [...v5Rank]
+          .map(s => {
+            const r = s as unknown as Record<string, number | null>;
+            const mom = (r.technical_score ?? 0) * 0.45
+              + (r.capital_score ?? 0) * 0.40
+              + (r.industry_score ?? 0) * 0.15;
+            return { ...s, _mom: mom };
+          })
+          .sort((a, b) => b._mom - a._mom);
+        return (
+          <DashboardSection
+            title="选股速览"
+            hint="价值 vs 动量"
+            action={
+              <Link href="/stocks" className="text-[11px] text-primary hover:underline flex items-center gap-0.5 shrink-0">
+                全部股票 <ChevronRight className="h-3 w-3" />
+              </Link>
+            }
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Landmark className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-xs font-semibold">价值 Top 3</h3>
+                  <span className="text-[10px] text-muted-foreground">composite_v5</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  {sortedRank.slice(0, 3).map((stock) => (
+                    <StockCard key={stock.stock_id} stock={stock} onClick={() => router.push(`/stocks/${stock.stock_id}`)} />
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Rocket className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="text-xs font-semibold">动量 Top 3</h3>
+                  <span className="text-[10px] text-muted-foreground">技术 + 资金</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  {momentumRank.slice(0, 3).map((stock) => (
+                    <StockCard key={stock.stock_id} stock={stock} onClick={() => router.push(`/stocks/${stock.stock_id}`)} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </DashboardSection>
+        );
+      })()}
 
       {mlTop.length > 0 && (
         <Card>
@@ -336,230 +396,128 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {/* 数据质量 + 宏观 */}
-      <div className="grid grid-cols-2 gap-4">
-        {quality && (
-          <Card><CardContent className="p-4">
-            <div className="text-xs text-muted-foreground mb-1">数据质量</div>
-            <div className="flex items-center gap-2 text-sm">
-              <span className="w-2 h-2 rounded-full bg-primary" />{quality.summary?.green||0}
-              <span className="w-2 h-2 rounded-full bg-amber-500 ml-2" />{quality.summary?.yellow||0}
-              <span className="w-2 h-2 rounded-full bg-destructive ml-2" />{quality.summary?.red||0}
-              <span className="text-xs text-muted-foreground ml-2">/ {quality.summary?.total||0}</span>
-            </div>
-          </CardContent></Card>
-        )}
-        {macro && (
-          <Card><CardContent className="p-4">
-            <div className="text-xs text-muted-foreground mb-1">宏观环境</div>
-            <div className="flex items-center gap-2">
-              <span className={`text-lg font-bold font-mono tabular-nums ${scoreTextClass(macro.score)}`}>{macro.score}分</span>
-              <span className="text-xs">{macro.label}</span>
-            </div>
-            {macro.indicators && (
-              <div className="flex gap-3 mt-1 text-[10px] text-muted-foreground">
-                {macro.indicators.pmi_manufacturing && <span>PMI:{macro.indicators.pmi_manufacturing}</span>}
-                {macro.indicators.cpi_yoy && <span>CPI:{macro.indicators.cpi_yoy}%</span>}
-                {macro.indicators.lpr_1y && <span>LPR:{macro.indicators.lpr_1y}%</span>}
-              </div>
-            )}
-          </CardContent></Card>
-        )}
-      </div>
-
-      {/* 每日综述 */}
-      <div className="space-y-2">
-        <MarketOpsButtons
-          ops={["review", "ths", "macro"]}
-          onMacroSynced={() => {
-            setMacroKey((k) => k + 1);
-            fetch("/api/macro/score").then((r) => r.json()).then(setMacro).catch(() => {});
-          }}
-        />
-        {review && (
-          <Card><CardContent className="px-4 py-3">
-            <div className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
-              <NotebookPen className="h-3.5 w-3.5" /> 每日综述
-            </div>
-            <div className="text-xs space-y-1 leading-relaxed">
-              <div>{review.review}</div>
-              <div className="text-primary">{review.focus}</div>
-              <div className="text-destructive">{review.risks}</div>
-            </div>
-          </CardContent></Card>
-        )}
-      </div>
-
-      {/* 同花顺热点 */}
-      <ThsHotspotsCard />
-
-      {/* 宏观指标明细 + 行业轮动 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <MacroIndicatorsPanel compact refreshKey={macroKey} />
-        <SectorRotationCard />
-      </div>
-
-      {/* 舆情热点 */}
-      {hotspots && hotspots.count > 0 && (
-        <Card><CardContent className="px-4 py-3">
-          <div className="text-xs font-medium text-destructive mb-2 flex items-center gap-1.5">
-            <Flame className="h-3.5 w-3.5" /> 舆情热点 ({hotspots.count})
-          </div>
-          {hotspots.hotspots?.slice(0,5).map((h:any,i:number) => (
-            <div key={i} className="text-xs py-1 border-b border-border last:border-0 flex items-center gap-1.5">
-              <span className="font-mono text-muted-foreground">{h.code}</span>
-              <span className="flex-1 truncate">{h.name}</span>
-              <span className="font-mono text-[11px] text-destructive">{h.cnt}条 · 情感 {h.avg_sentiment?.toFixed(1)}</span>
-            </div>
-          ))}
-        </CardContent></Card>
-      )}
-
-      {/* 双榜：价值 Top3 + 动量 Top3 */}
-      {sortedRank.length > 0 && (() => {
-        // 动量临时分 = technical×0.45 + capital×0.40 + industry×0.15（M1前用维度分假拼）
-        const momentumRank = [...v5Rank]
-          .map(s => {
-            const r = s as unknown as Record<string, number | null>;
-            const mom = (r.technical_score ?? 0) * 0.45
-              + (r.capital_score ?? 0) * 0.40
-              + (r.industry_score ?? 0) * 0.15;
-            return { ...s, _mom: mom };
-          })
-          .sort((a, b) => b._mom - a._mom);
-        return (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div>
-              <div className="flex items-center gap-2 mb-2 border-b border-border pb-1.5">
-                <Landmark className="h-4 w-4 text-muted-foreground" />
-                <h2 className="text-sm font-semibold">价值 Top 3</h2>
-                <span className="text-[10px] text-muted-foreground">composite_v5（长持/研究）</span>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                {sortedRank.slice(0, 3).map((stock) => (
-                  <StockCard key={stock.stock_id} stock={stock} onClick={() => router.push(`/stocks/${stock.stock_id}`)} />
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center gap-2 mb-2 border-b border-border pb-1.5">
-                <Rocket className="h-4 w-4 text-muted-foreground" />
-                <h2 className="text-sm font-semibold">动量 Top 3</h2>
-                <span className="text-[10px] text-muted-foreground">技术×0.45 + 资金×0.40（追涨/轮动）</span>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                {momentumRank.slice(0, 3).map((stock) => (
-                  <StockCard key={stock.stock_id} stock={stock} onClick={() => router.push(`/stocks/${stock.stock_id}`)} />
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* 评分分布 + PDF导出 */}
-      <div className="grid grid-cols-2 gap-4">
-        <Card>
-          <CardHeader><CardTitle className="text-base">V5 评分分布 ({v5Rank.length}只 · {v5ScopeLabel})</CardTitle></CardHeader>
-          <CardContent>
-            <ScoreDistribution scores={sortedRank} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-base">操作</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            <button onClick={() => window.open("/api/report/pdf", "_blank")}
-              className="w-full px-3 py-1.5 border border-border rounded-md text-sm hover:bg-muted transition-colors flex items-center justify-center gap-1.5">
-              <FileText className="h-3.5 w-3.5" /> 导出 PDF 报告
-            </button>
-            <button onClick={() => router.push("/stocks?view=grouped")}
-              className="w-full px-3 py-1.5 border border-border rounded-md text-sm hover:bg-muted transition-colors">
-              管理股票分组
-            </button>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* V5 评分排名 */}
       {v5Rank.length > 0 && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-3 flex-wrap">
-            <CardTitle className="text-sm flex items-center gap-1.5 flex-wrap">
-              <Trophy className="h-4 w-4 text-muted-foreground" />
-              V5 评分排名 · {v5ScopeLabel} ({v5Rank.length}只)
-              {v5CalcDate ? <span className="text-[11px] font-normal font-mono text-muted-foreground ml-2">评分日 {v5CalcDate}</span> : null}
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-muted-foreground whitespace-nowrap" htmlFor="v5-scope">
+        <DashboardSection
+          title="V5 评分"
+          hint={`${v5ScopeLabel} · ${v5Rank.length} 只${v5CalcDate ? ` · ${v5CalcDate}` : ""}`}
+          action={
+            <div className="flex items-center gap-2 shrink-0">
+              <label className="text-[10px] text-muted-foreground whitespace-nowrap" htmlFor="v5-scope">
                 范围
               </label>
               <select
                 id="v5-scope"
                 value={v5Scope}
                 onChange={(e) => setV5Scope(e.target.value as V5MarketScope)}
-                className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+                className="h-7 rounded-md border border-border bg-background px-2 text-[11px]"
               >
                 {V5_MARKET_SCOPES.map((opt) => (
                   <option key={opt.id} value={opt.id}>{opt.label}</option>
                 ))}
               </select>
             </div>
-            <button
-              onClick={() => exportCsv(
-                `v5_ranking_${v5CalcDate ?? "latest"}.csv`,
-                ["代码", "名称", "综合分", "状态"],
-                sortedRank.map((r) => [r.code, r.name, (r.score ?? r.composite_v5)?.toFixed(1) ?? "", r.veto_status ?? ""])
-              )}
-              className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded border hover:bg-accent transition-colors"
-            >
-              导出 CSV
-            </button>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="max-h-[500px] overflow-auto">
-              <table className="w-full text-sm min-w-[400px]">
-                <thead className="sticky top-0 bg-card z-10">
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 px-2 w-8">#</th>
-                    <th className="py-2 px-2">代码</th>
-                    <th className="py-2 px-2">名称</th>
-                    <th className="py-2 px-2 text-right cursor-pointer select-none hover:text-foreground"
-                        onClick={() => handleRankSort("score")}>
-                      综合分{sortArrow("score")}
-                    </th>
-                    <th className="py-2 px-2 text-right">30天</th>
-                    <th className="py-2 px-2 text-right">状态</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedRank.map((r, i) => (
-                    <tr key={r.stock_id} className="border-b hover:bg-muted/50 cursor-pointer"
-                        onClick={() => router.push(`/stocks/${r.stock_id}`)}>
-                      <td className="py-1.5 px-2 font-mono text-xs text-muted-foreground">{i + 1}</td>
-                      <td className="py-1.5 px-2 font-mono">{r.code}</td>
-                      <td className="py-1.5 px-2">{r.name}</td>
-                      <td className={`py-1.5 px-2 text-right font-mono font-semibold ${scoreTextClass(r.score ?? r.composite_v5)}`}>
-                        {(r.score ?? r.composite_v5)?.toFixed(1) ?? "-"}
-                      </td>
-                      <td className="py-1.5 px-2 text-right">
-                        <ScoreSparkline data={sparklines[String(r.stock_id)]} />
-                      </td>
-                      <td className="py-1.5 px-2 text-right text-xs">
-                        {r.veto_status === "exclude" ? (
-                          <span className="text-up font-medium">回避</span>
-                        ) : r.veto_status === "reduce" ? (
-                          <span className="text-amber-600 dark:text-amber-500">减仓</span>
-                        ) : (
-                          <span className="text-muted-foreground">正常</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+          }
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <Card className="lg:col-span-1">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">评分分布</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ScoreDistribution scores={sortedRank} />
+              </CardContent>
+            </Card>
+            <Card className="lg:col-span-2">
+              <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+                <CardTitle className="text-sm flex items-center gap-1.5">
+                  <Trophy className="h-4 w-4 text-muted-foreground" />
+                  排名 {showAllRank ? "全部" : `Top ${V5_RANK_PREVIEW}`}
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => exportCsv(
+                      `v5_ranking_${v5CalcDate ?? "latest"}.csv`,
+                      ["代码", "名称", "综合分", "状态"],
+                      sortedRank.map((r) => [r.code, r.name, (r.score ?? r.composite_v5)?.toFixed(1) ?? "", r.veto_status ?? ""])
+                    )}
+                    className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded border hover:bg-accent transition-colors"
+                  >
+                    导出 CSV
+                  </button>
+                  <button
+                    onClick={() => window.open("/api/report/pdf", "_blank")}
+                    className="text-[10px] text-muted-foreground hover:text-foreground px-2 py-1 rounded border hover:bg-accent transition-colors flex items-center gap-1"
+                  >
+                    <FileText className="h-3 w-3" /> PDF
+                  </button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className={showAllRank ? "max-h-[480px] overflow-auto" : undefined}>
+                  <table className="w-full text-sm min-w-[400px]">
+                    <thead className="sticky top-0 bg-card z-10">
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="py-2 px-2 w-8">#</th>
+                        <th className="py-2 px-2">代码</th>
+                        <th className="py-2 px-2">名称</th>
+                        <th className="py-2 px-2 text-right cursor-pointer select-none hover:text-foreground"
+                            onClick={() => handleRankSort("score")}>
+                          综合分{sortArrow("score")}
+                        </th>
+                        <th className="py-2 px-2 text-right">30天</th>
+                        <th className="py-2 px-2 text-right">状态</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rankDisplay.map((r, i) => (
+                        <tr key={r.stock_id} className="border-b hover:bg-muted/50 cursor-pointer"
+                            onClick={() => router.push(`/stocks/${r.stock_id}`)}>
+                          <td className="py-1.5 px-2 font-mono text-xs text-muted-foreground">{i + 1}</td>
+                          <td className="py-1.5 px-2 font-mono">{r.code}</td>
+                          <td className="py-1.5 px-2">{r.name}</td>
+                          <td className={`py-1.5 px-2 text-right font-mono font-semibold ${scoreTextClass(r.score ?? r.composite_v5)}`}>
+                            {(r.score ?? r.composite_v5)?.toFixed(1) ?? "-"}
+                          </td>
+                          <td className="py-1.5 px-2 text-right">
+                            <ScoreSparkline data={sparklines[String(r.stock_id)]} />
+                          </td>
+                          <td className="py-1.5 px-2 text-right text-xs">
+                            {r.veto_status === "exclude" ? (
+                              <span className="text-up font-medium">回避</span>
+                            ) : r.veto_status === "reduce" ? (
+                              <span className="text-amber-600 dark:text-amber-500">减仓</span>
+                            ) : (
+                              <span className="text-muted-foreground">正常</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {sortedRank.length > V5_RANK_PREVIEW && (
+                  <div className="border-t px-3 py-2 flex items-center justify-between text-[11px]">
+                    <span className="text-muted-foreground">
+                      共 {sortedRank.length} 只{showAllRank ? "" : `，显示前 ${V5_RANK_PREVIEW} 名`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAllRank((v) => !v)}
+                      className="text-primary hover:underline font-medium"
+                    >
+                      {showAllRank ? "收起" : "展开全部"}
+                    </button>
+                    {!showAllRank && (
+                      <Link href="/stocks" className="text-primary hover:underline flex items-center gap-0.5">
+                        股票列表 <ChevronRight className="h-3 w-3" />
+                      </Link>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </DashboardSection>
       )}
     </div>
   );

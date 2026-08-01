@@ -46,8 +46,39 @@ is_frontend_up() {
     [ -n "$(port_pids "$FRONTEND_PORT")" ]
 }
 
+frontend_running_mode() {
+    local pid
+    pid="$(port_pids "$FRONTEND_PORT" | head -1)"
+    [ -n "$pid" ] || { echo "none"; return; }
+    local args
+    args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+    if echo "$args" | grep -q "next dev"; then
+        echo "dev"
+    elif echo "$args" | grep -q "next start"; then
+        echo "prod"
+    else
+        echo "unknown"
+    fi
+}
+
+frontend_build_stale() {
+    [ ! -f "$FRONTEND_DIR/.next/BUILD_ID" ] && return 0
+    find "$FRONTEND_DIR/app" "$FRONTEND_DIR/components" "$FRONTEND_DIR/lib" \
+        -type f \( -name "*.tsx" -o -name "*.ts" \) -newer "$FRONTEND_DIR/.next/BUILD_ID" \
+        2>/dev/null | grep -q .
+}
+
+build_frontend_prod() {
+    cd "$FRONTEND_DIR"
+    echo "  构建前端生产包..."
+    npm run build >> "$PID_DIR/frontend.log" 2>&1 || {
+        echo "  前端构建失败，见 $PID_DIR/frontend.log"
+        return 1
+    }
+}
+
 backend_healthy() {
-    curl -s --max-time 4 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null 2>&1
+    curl -s --max-time 12 "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null 2>&1
 }
 
 start_backend() {
@@ -105,12 +136,8 @@ start_frontend_dev() {
 
 start_frontend_prod() {
     cd "$FRONTEND_DIR"
-    if [ ! -f ".next/BUILD_ID" ]; then
-        echo "  首次构建前端（约 1–3 分钟）..."
-        npm run build >> "$PID_DIR/frontend.log" 2>&1 || {
-            echo "  前端构建失败，见 $PID_DIR/frontend.log"
-            return 1
-        }
+    if frontend_build_stale; then
+        build_frontend_prod || return 1
     fi
     nohup npx next start -p "$FRONTEND_PORT" -H :: </dev/null >> "$PID_DIR/frontend.log" 2>&1 &
     echo $! > "$FRONTEND_PID"
@@ -130,9 +157,21 @@ start_frontend_prod() {
 
 start_frontend() {
     if is_frontend_up; then
-        echo "  前端已在运行 (Port: $FRONTEND_PORT)"
-        port_pids "$FRONTEND_PORT" | head -1 > "$FRONTEND_PID"
-        return 0
+        local running
+        running="$(frontend_running_mode)"
+        if [ "$running" != "none" ] && [ "$running" != "unknown" ] && [ "$running" != "$FRONTEND_MODE" ]; then
+            echo "  前端模式不匹配 (当前:$running 需要:$FRONTEND_MODE)，重启..."
+            stop_port "前端" "$FRONTEND_PORT" "$FRONTEND_PID"
+        else
+            if [ "$FRONTEND_MODE" = "prod" ] && frontend_build_stale; then
+                echo "  前端代码已更新，重建生产包..."
+                stop_port "前端" "$FRONTEND_PORT" "$FRONTEND_PID"
+            else
+                echo "  前端已在运行 (Port: $FRONTEND_PORT, mode: ${running:-$FRONTEND_MODE})"
+                port_pids "$FRONTEND_PORT" | head -1 > "$FRONTEND_PID"
+                return 0
+            fi
+        fi
     fi
     if [ "$FRONTEND_MODE" = "dev" ]; then
         start_frontend_dev
@@ -172,9 +211,9 @@ keepalive_loop() {
             echo "$(date '+%Y-%m-%d %H:%M:%S') 后端离线，重启..." >> "$PID_DIR/daemon.log"
             start_backend >> "$PID_DIR/daemon.log" 2>&1
         elif ! backend_healthy; then
-            # 端口在但 health 不通:可能是启动中/短暂繁忙,连续3次(约60s)才判僵尸
+            # 端口在但 health 不通:可能是启动中/长任务占满 worker,连续12次(约4分钟)才判僵尸
             health_fail=$((health_fail + 1))
-            if [ "$health_fail" -ge 3 ]; then
+            if [ "$health_fail" -ge 12 ]; then
                 echo "$(date '+%Y-%m-%d %H:%M:%S') 后端僵尸(端口占用但health连续${health_fail}次无响应)，强制重启..." >> "$PID_DIR/daemon.log"
                 start_backend >> "$PID_DIR/daemon.log" 2>&1
                 health_fail=0
@@ -240,6 +279,14 @@ case "${1:-daemon}" in
         echo "已全部停止"
         ;;
 
+    rebuild)
+        echo "=== 重建前端生产包 ==="
+        stop_port "前端" "$FRONTEND_PORT" "$FRONTEND_PID"
+        build_frontend_prod || exit 1
+        FRONTEND_MODE=prod start_frontend_prod || exit 1
+        echo "  完成: http://127.0.0.1:$FRONTEND_PORT"
+        ;;
+
     status)
         echo "=== 服务状态 ==="
         if is_backend_up; then
@@ -263,7 +310,7 @@ case "${1:-daemon}" in
         ;;
 
     *)
-        echo "用法: ./launch.sh [daemon|daemon dev|daemon prod|start|start prod|stop|status]"
+        echo "用法: ./launch.sh [daemon|daemon dev|daemon prod|start|start prod|rebuild|stop|status]"
         echo "  或双击 Start.command（macOS）"
         echo "  或 scripts/install-macos-service.sh（开机自启）"
         exit 1

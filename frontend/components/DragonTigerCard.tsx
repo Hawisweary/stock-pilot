@@ -36,7 +36,10 @@ export function DragonTigerCard({ refreshKey = 0 }: { refreshKey?: number }) {
       if (res.date) setTradeDate(res.date);
     } catch (e) {
       setItems([]);
-      setMeta({ error: e instanceof Error ? e.message : "加载失败" });
+      const msg = e instanceof Error ? e.message : "加载失败";
+      setMeta({
+        error: msg === "500" ? "服务繁忙，请稍后刷新" : msg,
+      });
     } finally {
       setLoading(false);
     }

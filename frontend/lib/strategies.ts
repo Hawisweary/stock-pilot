@@ -16,6 +16,9 @@ export const FALLBACK_STRATEGIES: StrategyOption[] = [
   { id: "index_enhance", label: "指数增强", kind: "v5", default_top_n: 15 },
   { id: "momentum", label: "动量因子", kind: "momentum", default_top_n: 5, default_min_score: 50 },
   { id: "dual_ma", label: "双均线", kind: "factor", default_top_n: 10, default_min_score: 0 },
+  { id: "dual_ma", label: "双均线", kind: "factor", default_top_n: 10, default_min_score: 1 },
+  { id: "reversal", label: "反转策略", kind: "factor", default_top_n: 10, default_min_score: 0 },
+  { id: "dividend_defensive", label: "红利防御", kind: "defensive", default_top_n: 15, default_min_score: 55 },
   { id: "turtle", label: "海龟交易", kind: "turtle", default_top_n: 5, default_min_score: 60 },
   { id: "sector_rotation", label: "行业轮动", kind: "sector", default_top_n: 10, default_min_score: 0 },
   { id: "factor_combination", label: "合成因子方案", kind: "combo", requires_combination_id: true },
@@ -36,7 +39,9 @@ export type PortfolioPreset = {
 
 export const PORTFOLIO_PRESETS: PortfolioPreset[] = [
   { id: "composite", label: "V5 综合", strategy: "composite", top_n: 5, min_score: 50, rebalance_schedule: "weekly" },
-  { id: "turtle", label: "海龟 20日", strategy: "turtle", top_n: 5, min_score: 60, lookback: 20, rebalance_schedule: "weekly" },
+  { id: "turtle", label: "海龟 20日", strategy: "turtle", top_n: 5, min_score: 60, lookback: 20, rebalance_schedule: "none" },
+  { id: "reversal", label: "反转 Top10", strategy: "reversal", top_n: 10, min_score: 0, rebalance_schedule: "weekly" },
+  { id: "dividend_def", label: "红利防御 Top15", strategy: "dividend_defensive", top_n: 15, min_score: 55, rebalance_schedule: "monthly" },
   { id: "momentum", label: "动量", strategy: "momentum", top_n: 5, min_score: 50, lookback: 20, rebalance_schedule: "weekly" },
   { id: "sector", label: "行业轮动", strategy: "sector_rotation", top_n: 10, min_score: 0, sector_window: 5, per_sector: 2, rebalance_schedule: "monthly" },
   { id: "index", label: "指数增强", strategy: "index_enhance", top_n: 15, min_score: 50, rebalance_schedule: "monthly" },
