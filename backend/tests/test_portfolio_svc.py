@@ -18,6 +18,9 @@ def patch_db(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "services.trade_pricing._fetch_realtime", lambda code: None
     )
+    # 放开市场时段限制:否则 trade() 在盘前/午休/周末跑会被"开盘前不可交易"拒绝,
+    # 造成测试随 wall-clock 时间时红时绿(见 trade_pricing._relax_session)
+    monkeypatch.setenv("AFR_PORTFOLIO_RELAX_SESSION", "1")
     """每个测试使用独立临时文件 DB，保证隔离"""
     db_file = str(tmp_path / "test.db")
     import config
