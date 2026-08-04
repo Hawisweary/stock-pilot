@@ -210,6 +210,22 @@ async def view_portfolio(portfolio_id: int):
     return _raise_if_error(get_portfolio(portfolio_id))
 
 
+@router.get("/portfolios/{portfolio_id}/attribution")
+async def portfolio_attribution(portfolio_id: int):
+    """组合级收益归因:每只持过的股(现持仓未实现+已平仓已实现)对初始资金的贡献(百分点)。"""
+    from services.portfolio_performance import compute_attribution
+
+    return _raise_if_error(compute_attribution(portfolio_id))
+
+
+@router.get("/portfolios/{portfolio_id}/position-perf")
+async def portfolio_position_perf(portfolio_id: int, code: str):
+    """单只现持仓的持有期分析:归一曲线 + 沪深300 同期 + 关键点 + vs 300/等权池 超额。"""
+    from services.portfolio_performance import compute_position_perf
+
+    return _raise_if_error(compute_position_perf(portfolio_id, code))
+
+
 @router.get("/portfolios/{portfolio_id}/nav-series")
 async def portfolio_nav_series(portfolio_id: int, days: int = 90):
     """B-2：组合历史净值曲线（归一化 100 起点）+ CSI300 基准对照。
