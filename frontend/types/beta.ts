@@ -197,6 +197,8 @@ export type PerfRow = {
 export type PositionPerf = {
   code: string;
   name: string;
+  closed?: boolean;
+  end_date?: string;
   buy_date: string;
   hold_days: number;
   avg_cost: number;

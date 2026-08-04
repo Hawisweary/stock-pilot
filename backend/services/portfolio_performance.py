@@ -150,35 +150,48 @@ def _pool_return(conn: sqlite3.Connection, start: str, end: str) -> float | None
 
 
 def compute_position_perf(portfolio_id: int, code: str, conn: sqlite3.Connection | None = None) -> dict:
-    """单票:自最早买入起的 adj_close 归一曲线 + 沪深300 同期归一 + 关键点 + 超额。"""
+    """单票持有期分析:adj_close 归一曲线 + 沪深300 同期归一 + 关键点 + 超额。
+    现持仓 → 买入至今;已平仓 → 买入至最后一笔卖出(closed=True)。"""
     conn, close = _conn(conn)
     try:
         pos = conn.execute(
-            """SELECT p.stock_id, s.name, p.shares, p.avg_cost
-               FROM portfolio_positions p JOIN stocks s ON s.id=p.stock_id
+            """SELECT p.stock_id, s.name FROM portfolio_positions p JOIN stocks s ON s.id=p.stock_id
                WHERE p.portfolio_id=? AND s.code=? AND p.shares>0""",
             (portfolio_id, code),
         ).fetchone()
-        if not pos:
-            return {"error": "非当前持仓"}
-        stock_id = pos["stock_id"]
-        # 最早买入日(FIFO 最早未平笔;简化取该股最早买入)
-        bd = conn.execute(
-            "SELECT MIN(buy_date) FROM portfolio_lots WHERE portfolio_id=? AND stock_id=?",
-            (portfolio_id, stock_id),
-        ).fetchone()
-        buy_date = (bd and bd[0]) or conn.execute(
+        is_closed = pos is None
+        if is_closed:
+            srow = conn.execute("SELECT id, name FROM stocks WHERE code=?", (code,)).fetchone()
+            if not srow:
+                return {"error": "未知代码"}
+            stock_id, name = int(srow["id"]), srow["name"]
+        else:
+            stock_id, name = int(pos["stock_id"]), pos["name"]
+
+        buy_date = conn.execute(
             "SELECT MIN(trade_date) FROM trade_journal WHERE portfolio_id=? AND stock_id=? AND action='BUY'",
             (portfolio_id, stock_id),
         ).fetchone()[0]
+        if not is_closed and not buy_date:
+            bd = conn.execute(
+                "SELECT MIN(buy_date) FROM portfolio_lots WHERE portfolio_id=? AND stock_id=?",
+                (portfolio_id, stock_id),
+            ).fetchone()
+            buy_date = bd and bd[0]
         if not buy_date:
             return {"error": "无买入记录"}
+        # 已平仓:曲线到最后一笔卖出日;现持仓:到最新交易日(无上界)
+        end_cap = conn.execute(
+            "SELECT MAX(trade_date) FROM trade_journal WHERE portfolio_id=? AND stock_id=? AND action='SELL'",
+            (portfolio_id, stock_id),
+        ).fetchone()[0] if is_closed else None
 
         bars = conn.execute(
             """SELECT trade_date, COALESCE(adj_close, close) c FROM stock_daily_quotes
-               WHERE stock_id=? AND trade_date>=? AND COALESCE(adj_close, close) IS NOT NULL
+               WHERE stock_id=? AND trade_date>=? AND (? IS NULL OR trade_date<=?)
+                 AND COALESCE(adj_close, close) IS NOT NULL
                ORDER BY trade_date ASC""",
-            (stock_id, buy_date),
+            (stock_id, buy_date, end_cap, end_cap),
         ).fetchall()
         if len(bars) < 2:
             return {"error": "行情不足"}
@@ -213,9 +226,16 @@ def compute_position_perf(portfolio_id: int, code: str, conn: sqlite3.Connection
             pass
 
         pool_ret = _pool_return(conn, buy_date, end_date)
+        # 加权平均买入价(展示用)
+        buys = conn.execute(
+            "SELECT shares, price FROM trade_journal WHERE portfolio_id=? AND stock_id=? AND action='BUY'",
+            (portfolio_id, stock_id),
+        ).fetchall()
+        tot_sh = sum(int(b["shares"] or 0) for b in buys)
+        avg_cost = (sum(int(b["shares"] or 0) * float(b["price"] or 0) for b in buys) / tot_sh) if tot_sh else base
         return {
-            "code": code, "name": pos["name"], "buy_date": buy_date,
-            "hold_days": hold_days, "avg_cost": round(float(pos["avg_cost"]), 3),
+            "code": code, "name": name, "closed": is_closed, "buy_date": buy_date, "end_date": end_date,
+            "hold_days": hold_days, "avg_cost": round(avg_cost, 3),
             "current": round(cur, 3), "stock_return_pct": stock_ret,
             "peak_pct": round(peak - 100, 2), "trough_pct": round(trough - 100, 2),
             "drawdown_from_peak_pct": dd_from_peak,

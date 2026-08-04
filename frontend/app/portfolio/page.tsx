@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense, Fragment } from "react";
 import { useSearchParams } from "next/navigation";
 import { Bell, AlertTriangle, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BetaShell, BetaTabs, BETA_TABS } from "@/components/BetaShell";
 import { BetaDualChart } from "@/components/BetaDualChart";
+import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { Skeleton, EmptyState, StatTile } from "@/components/ui/data-ui";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/useToast";
 import type {
-  PortfolioDetail, PortfolioSummary, PortfolioPosition, PositionPerf,
+  PortfolioDetail, PortfolioSummary, PortfolioPosition, PositionPerf, PerfRow,
   PortfolioMetrics, PortfolioCompare, BuildPreview, PortfolioSettings,
   FeePreview, PricingContext,
 } from "@/types/beta";
@@ -40,6 +41,16 @@ function PortfolioInner() {
   const [selected, setSelected] = useState<PortfolioDetail | null>(null);
   const [metrics, setMetrics] = useState<PortfolioMetrics | null>(null);
   const [tab, setTab] = useState<Tab>("holdings");
+  const [expHold, setExpHold] = useState<string | null>(null);
+  const [holdPerf, setHoldPerf] = useState<Record<string, PositionPerf>>({});
+  const toggleHold = async (code: string, pid: number) => {
+    if (expHold === code) { setExpHold(null); return; }
+    setExpHold(code);
+    if (!holdPerf[code]) {
+      try { const p = await api.portfolioPositionPerf(pid, code); setHoldPerf((prev) => ({ ...prev, [code]: p })); }
+      catch { /* ignore */ }
+    }
+  };
   const [tradeCode, setTradeCode] = useState("");
   const [tradeShares, setTradeShares] = useState(100);
   const [feePreview, setFeePreview] = useState<FeePreview | null>(null);
@@ -643,12 +654,26 @@ function PortfolioInner() {
                       </tr></thead>
                       <tbody>
                         {positions.map((p) => (
-                          <PositionRow
-                            key={p.code}
-                            p={p}
-                            showStop={showTurtleTools}
-                            onSell={() => doTrade("sell", p.code, Math.min(p.sellable_shares, p.shares))}
-                          />
+                          <Fragment key={p.code}>
+                            <PositionRow
+                              p={p}
+                              showStop={showTurtleTools}
+                              onSell={() => doTrade("sell", p.code, Math.min(p.sellable_shares, p.shares))}
+                              onToggle={() => toggleHold(p.code, selected.id)}
+                              expanded={expHold === p.code}
+                            />
+                            {expHold === p.code && (
+                              <tr>
+                                <td colSpan={showTurtleTools ? 8 : 7} className="bg-muted/20 px-3 py-2">
+                                  {holdPerf[p.code]
+                                    ? (holdPerf[p.code].error
+                                        ? <p className="text-[11px] text-muted-foreground">{holdPerf[p.code].error}</p>
+                                        : <PositionPerfDetail p={holdPerf[p.code]} />)
+                                    : <div className="text-[11px] text-muted-foreground">加载中…</div>}
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
                         ))}
                       </tbody>
                     </table>
@@ -1064,12 +1089,12 @@ function TradePanel(props: {
   );
 }
 
-function PositionRow({ p, showStop, onSell }: { p: PortfolioPosition; showStop?: boolean; onSell: () => void }) {
+function PositionRow({ p, showStop, onSell, onToggle, expanded }: { p: PortfolioPosition; showStop?: boolean; onSell: () => void; onToggle?: () => void; expanded?: boolean }) {
   const belowStop = p.turtle_stop_price != null && p.price != null && p.price < p.turtle_stop_price;
   return (
-    <tr className="border-b border-border">
+    <tr className={`border-b border-border ${onToggle ? "cursor-pointer hover:bg-muted/40" : ""} ${expanded ? "bg-muted/30" : ""}`} onClick={onToggle}>
       <td className="py-1">
-        <div className="font-mono">{p.code}</div>
+        <div className="font-mono">{expanded ? "▾ " : "▸ "}{p.code}</div>
         {p.name ? <div className="text-[10px] text-muted-foreground truncate max-w-[88px]" title={p.name}>{p.name}</div> : null}
       </td>
       <td className="text-center font-mono tabular-nums">{p.shares}{p.t1_locked > 0 ? <span className="text-amber-600 dark:text-amber-500 ml-0.5 inline-flex items-center" title="T+1"><Lock className="h-2.5 w-2.5" />{p.t1_locked}</span> : null}</td>
@@ -1094,7 +1119,7 @@ function PositionRow({ p, showStop, onSell }: { p: PortfolioPosition; showStop?:
           <div className="text-[9px] text-muted-foreground">含成本 {fmtPct(p.pnl_pct)}</div>
         )}
       </td>
-      <td className="text-right">{p.sellable_shares >= 100 && <button onClick={onSell} className="text-[10px] text-down underline">卖</button>}</td>
+      <td className="text-right">{p.sellable_shares >= 100 && <button onClick={(e) => { e.stopPropagation(); onSell(); }} className="text-[10px] text-down underline">卖</button>}</td>
     </tr>
   );
 }
@@ -1132,10 +1157,10 @@ function PerformanceTab({ pid }: { pid: number }) {
     api.portfolioAttribution(pid).then(setAttr).catch(() => setAttr(null)).finally(() => setLoading(false));
   }, [pid]);
 
-  const toggle = async (code: string, held: boolean) => {
+  const toggle = async (code: string) => {
     if (expanded === code) { setExpanded(null); return; }
     setExpanded(code);
-    if (held && !perf[code]) {
+    if (!perf[code]) {
       try { const p = await api.portfolioPositionPerf(pid, code); setPerf((prev) => ({ ...prev, [code]: p })); }
       catch { /* ignore */ }
     }
@@ -1153,6 +1178,8 @@ function PerformanceTab({ pid }: { pid: number }) {
         <StatTile label="功臣" value={String(attr.winners.length)} tone="up" sub="正贡献个股" />
         <StatTile label="拖累" value={String(attr.losers.length)} tone="down" sub="负贡献个股" />
       </div>
+      {/* 累计瀑布图:从 0 逐只累加到总贡献 */}
+      <AttributionWaterfall rows={attr.rows} />
       <div className="text-[10px] text-muted-foreground px-1">收益归因:每只持过的股(现持仓未实现 + 已平仓已实现)对初始资金的贡献。点开看单票曲线与超额。</div>
       <div className="rounded-md border border-border bg-card divide-y divide-border">
         {attr.rows.map((r) => {
@@ -1161,7 +1188,7 @@ function PerformanceTab({ pid }: { pid: number }) {
           const p = perf[r.code];
           return (
             <div key={r.code}>
-              <button onClick={() => toggle(r.code, r.still_held)} className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/40 text-left">
+              <button onClick={() => toggle(r.code)} className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/40 text-left">
                 <span className="w-14 font-mono shrink-0">{r.code}</span>
                 <span className="w-16 truncate shrink-0">{r.name}</span>
                 {!r.still_held && <span className="text-[9px] text-muted-foreground shrink-0">已平</span>}
@@ -1173,10 +1200,8 @@ function PerformanceTab({ pid }: { pid: number }) {
               </button>
               {expanded === r.code && (
                 <div className="px-3 pb-3 pt-1 bg-muted/20">
-                  {!r.still_held
-                    ? <p className="text-[11px] text-muted-foreground">已平仓 · 已实现盈亏 ¥{r.realized.toLocaleString()}(持有期曲线仅现持仓可看)</p>
-                    : p ? (p.error ? <p className="text-[11px] text-muted-foreground">{p.error}</p> : <PositionPerfDetail p={p} />)
-                      : <div className="text-[11px] text-muted-foreground py-2">加载中…</div>}
+                  {p ? (p.error ? <p className="text-[11px] text-muted-foreground">{p.error}</p> : <PositionPerfDetail p={p} />)
+                     : <div className="text-[11px] text-muted-foreground py-2">加载中…</div>}
                 </div>
               )}
             </div>
@@ -1197,6 +1222,9 @@ function PositionPerfDetail({ p }: { p: PositionPerf }) {
   const sr = p.stock_return_pct;
   return (
     <div className="space-y-2">
+      <div className="text-[10px] text-muted-foreground font-mono">
+        {p.buy_date} → {p.closed ? `${p.end_date}(已平仓)` : "至今"}
+      </div>
       <div className="grid grid-cols-4 gap-2">
         {cell("持有天数", `${p.hold_days}天`)}
         {cell("本票收益", `${sr >= 0 ? "+" : ""}${sr}%`, sr >= 0 ? "up" : "down")}
@@ -1212,6 +1240,42 @@ function PositionPerfDetail({ p }: { p: PositionPerf }) {
           strategy={p.curve.map((c) => ({ date: c.date, value: c.v / 100 }))}
           benchmark={p.csi300_curve.map((c) => ({ date: c.date, value: c.v / 100 }))} />
       )}
+    </div>
+  );
+}
+
+// 累计瀑布图:每只股从 0 逐笔累加贡献(百分点),功臣红柱上抬/拖累绿柱下压
+function AttributionWaterfall({ rows }: { rows: PerfRow[] }) {
+  if (!rows.length) return null;
+  let cum = 0;
+  const data = rows.map((r) => {
+    const before = cum;
+    cum = +(cum + r.contribution_pp).toFixed(3);
+    return {
+      code: r.code, name: r.name, cp: r.contribution_pp,
+      base: Math.min(before, cum),          // 悬浮起点
+      val: Math.abs(r.contribution_pp) || 0.0001,
+      up: r.contribution_pp >= 0,
+    };
+  });
+  return (
+    <div className="rounded-md border border-border bg-card p-2">
+      <div className="text-[10px] text-muted-foreground px-1 pb-1">累计贡献瀑布(pp) · 终点={cum.toFixed(2)}pp</div>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 28 }} barCategoryGap="18%">
+          <XAxis dataKey="code" tick={{ fontSize: 9 }} angle={-45} textAnchor="end" interval={0} tickLine={false} />
+          <YAxis tick={{ fontSize: 9 }} tickFormatter={(v) => `${v}`} />
+          <ReferenceLine y={0} stroke="var(--border)" />
+          <Tooltip
+            contentStyle={{ fontSize: 11 }}
+            formatter={(_v, _n, p) => [`${p.payload.cp >= 0 ? "+" : ""}${p.payload.cp}pp`, `${p.payload.code} ${p.payload.name}`]}
+          />
+          <Bar dataKey="base" stackId="a" fill="transparent" />
+          <Bar dataKey="val" stackId="a" radius={[2, 2, 0, 0]}>
+            {data.map((d, i) => <Cell key={i} fill={d.up ? "var(--up)" : "var(--down)"} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }
