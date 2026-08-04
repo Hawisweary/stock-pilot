@@ -184,6 +184,36 @@ export type PortfolioSettings = {
   default_per_sector?: number;
 };
 
+export type PerfRow = {
+  code: string;
+  name: string;
+  still_held: boolean;
+  realized: number;
+  unrealized: number;
+  total_pnl: number;
+  contribution_pp: number;
+};
+
+export type PositionPerf = {
+  code: string;
+  name: string;
+  buy_date: string;
+  hold_days: number;
+  avg_cost: number;
+  current: number;
+  stock_return_pct: number;
+  peak_pct: number;
+  trough_pct: number;
+  drawdown_from_peak_pct: number;
+  csi300_return_pct: number | null;
+  excess_vs_csi300_pp: number | null;
+  pool_return_pct: number | null;
+  excess_vs_pool_pp: number | null;
+  curve: { date: string; v: number }[];
+  csi300_curve: { date: string; v: number }[];
+  error?: string;
+};
+
 export type PortfolioMetrics = {
   portfolio_id: number;
   total_return_pct: number;

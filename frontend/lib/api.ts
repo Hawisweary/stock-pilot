@@ -1050,6 +1050,18 @@ export const api = {
       { method: "POST" },
     ),
 
+  portfolioAttribution: (id: number) =>
+    request<{
+      initial_cash: number; total_pnl: number; total_contribution_pp: number;
+      winners: import("@/types/beta").PerfRow[];
+      losers: import("@/types/beta").PerfRow[];
+      rows: import("@/types/beta").PerfRow[];
+    }>(`/portfolio/portfolios/${id}/attribution`),
+
+  portfolioPositionPerf: (id: number, code: string) =>
+    request<import("@/types/beta").PositionPerf>(
+      `/portfolio/portfolios/${id}/position-perf?code=${encodeURIComponent(code)}`),
+
   portfolioNavSeries: (id: number, days = 90) =>
     request<{ dates: string[]; nav: number[]; benchmark: (number | null)[]; base_value: number | null }>(
       `/portfolio/portfolios/${id}/nav-series?days=${days}`

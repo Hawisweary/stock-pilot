@@ -6,10 +6,11 @@ import { Bell, AlertTriangle, Lock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BetaShell, BetaTabs, BETA_TABS } from "@/components/BetaShell";
 import { BetaDualChart } from "@/components/BetaDualChart";
+import { Skeleton, EmptyState, StatTile } from "@/components/ui/data-ui";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/useToast";
 import type {
-  PortfolioDetail, PortfolioSummary, PortfolioPosition,
+  PortfolioDetail, PortfolioSummary, PortfolioPosition, PositionPerf,
   PortfolioMetrics, PortfolioCompare, BuildPreview, PortfolioSettings,
   FeePreview, PricingContext,
 } from "@/types/beta";
@@ -22,7 +23,7 @@ import {
   type StrategyOption,
 } from "@/lib/strategies";
 
-type Tab = "holdings" | "compare" | "settings";
+type Tab = "holdings" | "perf" | "compare" | "settings";
 
 export default function PortfolioPage() {
   return (
@@ -435,10 +436,10 @@ function PortfolioInner() {
           )}
 
           <div className="flex gap-2 border-b pb-1">
-            {(["holdings", "compare", "settings"] as Tab[]).map((t) => (
+            {(["holdings", "perf", "compare", "settings"] as Tab[]).map((t) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`px-3 py-1 text-xs rounded-t ${tab === t ? "bg-muted font-medium" : "text-muted-foreground"}`}>
-                {t === "holdings" ? "持仓交易" : t === "compare" ? "vs 回测" : "设置"}
+                {t === "holdings" ? "持仓交易" : t === "perf" ? "表现分析" : t === "compare" ? "vs 回测" : "设置"}
               </button>
             ))}
             <a href={api.portfolioExportUrl(selected.id)} className="ml-auto text-xs text-primary underline self-center">导出 CSV</a>
@@ -774,6 +775,8 @@ function PortfolioInner() {
               </Card>
             </div>
           )}
+
+          {tab === "perf" && selected && <PerformanceTab pid={selected.id} />}
 
           {tab === "compare" && (
             <div className="space-y-3">
@@ -1115,4 +1118,100 @@ function NetChart({ data }: { data: { snapshot_date: string; total_value: number
     ctx.stroke();
   }, [data]);
   return <canvas ref={ref} className="w-full" style={{ height: 80 }} />;
+}
+
+// ========== 表现分析 tab(组合级归因 + 单票展开)==========
+function PerformanceTab({ pid }: { pid: number }) {
+  const [attr, setAttr] = useState<Awaited<ReturnType<typeof api.portfolioAttribution>> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [perf, setPerf] = useState<Record<string, PositionPerf>>({});
+
+  useEffect(() => {
+    setLoading(true);
+    api.portfolioAttribution(pid).then(setAttr).catch(() => setAttr(null)).finally(() => setLoading(false));
+  }, [pid]);
+
+  const toggle = async (code: string, held: boolean) => {
+    if (expanded === code) { setExpanded(null); return; }
+    setExpanded(code);
+    if (held && !perf[code]) {
+      try { const p = await api.portfolioPositionPerf(pid, code); setPerf((prev) => ({ ...prev, [code]: p })); }
+      catch { /* ignore */ }
+    }
+  };
+
+  if (loading) return <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-8" />)}</div>;
+  if (!attr || !attr.rows?.length) return <EmptyState title="暂无表现数据" hint="建仓后即可分析每只持仓的贡献与超额" />;
+
+  const maxAbs = Math.max(...attr.rows.map((r) => Math.abs(r.contribution_pp)), 0.01);
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 divide-x divide-border rounded-md border border-border bg-card">
+        <StatTile label="总贡献" value={`${attr.total_contribution_pp >= 0 ? "+" : ""}${attr.total_contribution_pp}pp`}
+          tone={attr.total_contribution_pp >= 0 ? "up" : "down"} sub={`总盈亏 ¥${attr.total_pnl.toLocaleString()}`} />
+        <StatTile label="功臣" value={String(attr.winners.length)} tone="up" sub="正贡献个股" />
+        <StatTile label="拖累" value={String(attr.losers.length)} tone="down" sub="负贡献个股" />
+      </div>
+      <div className="text-[10px] text-muted-foreground px-1">收益归因:每只持过的股(现持仓未实现 + 已平仓已实现)对初始资金的贡献。点开看单票曲线与超额。</div>
+      <div className="rounded-md border border-border bg-card divide-y divide-border">
+        {attr.rows.map((r) => {
+          const up = r.total_pnl >= 0;
+          const w = Math.abs(r.contribution_pp) / maxAbs * 100;
+          const p = perf[r.code];
+          return (
+            <div key={r.code}>
+              <button onClick={() => toggle(r.code, r.still_held)} className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/40 text-left">
+                <span className="w-14 font-mono shrink-0">{r.code}</span>
+                <span className="w-16 truncate shrink-0">{r.name}</span>
+                {!r.still_held && <span className="text-[9px] text-muted-foreground shrink-0">已平</span>}
+                <div className="flex-1 h-2.5 min-w-[40px]">
+                  <div className={`h-full rounded ${up ? "bg-up" : "bg-down"}`} style={{ width: `${w}%` }} />
+                </div>
+                <span className={`w-16 text-right font-mono tabular-nums shrink-0 ${up ? "text-up" : "text-down"}`}>{up ? "+" : ""}{r.contribution_pp}pp</span>
+                <span className="w-20 text-right font-mono tabular-nums text-muted-foreground shrink-0 hidden sm:block">¥{r.total_pnl.toLocaleString()}</span>
+              </button>
+              {expanded === r.code && (
+                <div className="px-3 pb-3 pt-1 bg-muted/20">
+                  {!r.still_held
+                    ? <p className="text-[11px] text-muted-foreground">已平仓 · 已实现盈亏 ¥{r.realized.toLocaleString()}(持有期曲线仅现持仓可看)</p>
+                    : p ? (p.error ? <p className="text-[11px] text-muted-foreground">{p.error}</p> : <PositionPerfDetail p={p} />)
+                      : <div className="text-[11px] text-muted-foreground py-2">加载中…</div>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PositionPerfDetail({ p }: { p: PositionPerf }) {
+  const cell = (label: string, val: string, tone?: "up" | "down") => (
+    <div>
+      <div className="text-[9px] text-muted-foreground uppercase tracking-wide">{label}</div>
+      <div className={`text-xs font-mono tabular-nums ${tone === "up" ? "text-up" : tone === "down" ? "text-down" : ""}`}>{val}</div>
+    </div>
+  );
+  const sr = p.stock_return_pct;
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-4 gap-2">
+        {cell("持有天数", `${p.hold_days}天`)}
+        {cell("本票收益", `${sr >= 0 ? "+" : ""}${sr}%`, sr >= 0 ? "up" : "down")}
+        {cell("区间最高", `+${p.peak_pct}%`, "up")}
+        {cell("从峰值回撤", `${p.drawdown_from_peak_pct}%`, p.drawdown_from_peak_pct < 0 ? "down" : undefined)}
+        {p.excess_vs_csi300_pp != null && cell("超沪深300", `${p.excess_vs_csi300_pp >= 0 ? "+" : ""}${p.excess_vs_csi300_pp}pp`, p.excess_vs_csi300_pp >= 0 ? "up" : "down")}
+        {p.excess_vs_pool_pp != null && cell("超自选池", `${p.excess_vs_pool_pp >= 0 ? "+" : ""}${p.excess_vs_pool_pp}pp`, p.excess_vs_pool_pp >= 0 ? "up" : "down")}
+        {p.csi300_return_pct != null && cell("同期沪深300", `${p.csi300_return_pct >= 0 ? "+" : ""}${p.csi300_return_pct}%`)}
+        {p.pool_return_pct != null && cell("同期自选池", `${p.pool_return_pct >= 0 ? "+" : ""}${p.pool_return_pct}%`)}
+      </div>
+      {p.curve.length > 1 && (
+        <BetaDualChart title={`${p.name} vs 沪深300(买入=100)`}
+          strategy={p.curve.map((c) => ({ date: c.date, value: c.v / 100 }))}
+          benchmark={p.csi300_curve.map((c) => ({ date: c.date, value: c.v / 100 }))} />
+      )}
+    </div>
+  );
 }
