@@ -24,6 +24,60 @@ import os
 
 _STATE_FILE = os.path.join(DATA_DIR, "scheduler_state.json")
 
+# ── WAL 看门狗 + 调度子进程登记表 ───────────────────────────────
+# 常驻读连接会阻塞被动 checkpoint,WAL 曾在一次卡死的 daily 里涨到 158GB 打爆全站。
+# 软顶:超过就主动 TRUNCATE(能收多少收多少)。硬顶:强杀正在跑的调度子进程 + TRUNCATE
+# ——止损优先。被杀的那一步未提交事务自动作废(SQLite WAL 语义),已提交步骤全部保留。
+_WAL_SOFT_CAP_MB = 512
+_WAL_HARD_CAP_MB = 8192
+_running_procs: dict = {}          # pid -> (Popen, job_label)
+_procs_lock = threading.Lock()
+
+
+def _wal_mb() -> float:
+    try:
+        wal_path = DB_PATH + "-wal"
+        return os.path.getsize(wal_path) / 1e6 if os.path.exists(wal_path) else 0.0
+    except OSError:
+        return 0.0
+
+
+def _kill_running_jobs(reason: str) -> list[str]:
+    killed = []
+    with _procs_lock:
+        for pid, (proc, label) in list(_running_procs.items()):
+            try:
+                proc.kill()
+                killed.append(f"{label}(pid={pid})")
+            except Exception as e:
+                logger.warning("[WAL看门狗] 杀 %s 失败: %s", label, e)
+    if killed:
+        logger.error("[WAL看门狗] %s → 强杀: %s", reason, ", ".join(killed))
+    return killed
+
+
+def _wal_watchdog_loop():
+    """独立线程:每 60s 查 WAL 大小。软顶主动 TRUNCATE;硬顶强杀调度子进程再 TRUNCATE。
+    必须独立于调度主循环——主循环在 subprocess 阻塞期间(可长达数小时)无法自查,
+    正是上次 WAL 涨到 158GB 无人干预的根因。"""
+    import database as _db
+
+    while True:
+        time.sleep(60)
+        try:
+            wal = _wal_mb()
+            if wal >= _WAL_HARD_CAP_MB:
+                _kill_running_jobs(f"WAL={wal:.0f}MB≥硬顶{_WAL_HARD_CAP_MB}MB")
+                time.sleep(2)  # 等写进程真正退出,TRUNCATE 才能拿到无写者的库
+                r = _db.checkpoint("TRUNCATE", wal_threshold_mb=0)
+                logger.error("[WAL看门狗] 硬顶后 TRUNCATE: %s", r)
+            elif wal >= _WAL_SOFT_CAP_MB:
+                r = _db.checkpoint("TRUNCATE", wal_threshold_mb=0)
+                if not r.get("skipped"):
+                    logger.info("[WAL看门狗] 软顶 TRUNCATE (WAL=%.0fMB): %s", wal, r)
+        except Exception as e:
+            logger.warning("[WAL看门狗] 检查失败: %s", e)
+
 
 def _write_state_file(state: dict) -> None:
     tmp = _STATE_FILE + ".tmp"
@@ -100,16 +154,29 @@ def _run_job_subprocess(job: str, timeout_sec: int) -> str:
         "scripts",
         "run_scheduled_job.py",
     )
-    r = subprocess.run(
+    # 用 Popen + 登记表,让 WAL 看门狗线程能在 WAL 失控时强杀本子进程
+    proc = subprocess.Popen(
         [sys.executable, script, job],
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout_sec,
     )
-    lines = [ln for ln in (r.stdout or "").strip().split("\n") if ln.strip()]
+    with _procs_lock:
+        _running_procs[proc.pid] = (proc, job)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate()
+        raise RuntimeError(f"timeout after {timeout_sec}s")
+    finally:
+        with _procs_lock:
+            _running_procs.pop(proc.pid, None)
+    lines = [ln for ln in (stdout or "").strip().split("\n") if ln.strip()]
     last = lines[-1] if lines else ""
-    if r.returncode != 0:
-        raise RuntimeError(f"exit={r.returncode} stderr={(r.stderr or '')[-300:]}")
+    if proc.returncode != 0:
+        # 被看门狗 kill 时 returncode 为负(信号),提示 WAL 失控止损
+        raise RuntimeError(f"exit={proc.returncode} stderr={(stderr or '')[-300:]}")
     return last
 
 
@@ -120,24 +187,11 @@ def start_scheduler(app):
         # 状态持久化在 DB，进程重启后自动恢复；触发条件为
         # 「已过当日触发时刻 且 今天尚未执行」→ 错过窗口也会在重启后补跑
         state = _load_state()
-        last_wal_check = 0.0
+        # WAL 看门狗独立跑在 _wal_watchdog_loop 线程(见 start_scheduler)。
+        # 不放这里:本循环在 _run_job_subprocess 阻塞期间(可数小时)无法自查,
+        # 正是上次 WAL 涨到 158GB 无人干预的根因。
         while True:
             now = datetime.now()
-
-            # WAL 看门狗：每 ~5 分钟检查一次,WAL 超过 512MB 就 TRUNCATE。
-            # 常驻读连接会阻塞被动 autocheckpoint,此主动兜底防止 WAL 膨胀
-            # 到打爆后端(曾涨到 154GB 导致每个读查询扫穿 WAL 卡死全站)
-            if time.time() - last_wal_check > 300:
-                last_wal_check = time.time()
-                try:
-                    import database as _db
-
-                    r = _db.checkpoint("TRUNCATE", wal_threshold_mb=512)
-                    if not r.get("skipped"):
-                        logger.info("[Scheduler] WAL checkpoint: %s", r)
-                except Exception as e:
-                    logger.warning("[Scheduler] WAL checkpoint failed: %s", e)
-
             today_key = now.strftime("%Y-%m-%d")
             from config import (
                 V5_NIGHTLY_FETCH_HOUR,
@@ -229,7 +283,13 @@ def start_scheduler(app):
 
     t = threading.Thread(target=_loop, daemon=True, name="daily-scheduler")
     t.start()
-    logger.info("[Scheduler] 每日自动任务已启动 (9:35开盘执行, 15:30收盘入队, 状态持久化+错过窗口自动补跑)")
+    wt = threading.Thread(target=_wal_watchdog_loop, daemon=True, name="wal-watchdog")
+    wt.start()
+    logger.info(
+        "[Scheduler] 每日自动任务已启动 (9:35开盘执行, 15:30收盘入队, 状态持久化+错过窗口自动补跑); "
+        "WAL看门狗已启动 (软顶%dMB TRUNCATE / 硬顶%dMB 强杀作业)",
+        _WAL_SOFT_CAP_MB, _WAL_HARD_CAP_MB,
+    )
 
 
 def run_morning_tasks() -> str:
@@ -341,10 +401,49 @@ def _todays_quotes_ready() -> bool:
         conn.close()
 
 
+def _open_daily_log():
+    """分步日志落盘 → 子进程被 kill/超时后仍能看到卡在哪一步(stdout 被 capture 吞掉)。"""
+    from datetime import date as dt_date
+
+    try:
+        log_dir = os.path.join(DATA_DIR, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, f"daily_{dt_date.today():%Y%m%d}.log")
+        fh = open(path, "a", encoding="utf-8")
+        return fh
+    except Exception as e:
+        logger.warning("[Scheduler] 打开 daily 日志失败: %s", e)
+        return None
+
+
+def _dlog(fh, text: str) -> None:
+    """写一行带时间戳的分步日志并立即 flush(卡死时最后一行=正卡住的步)。"""
+    if fh is None:
+        return
+    try:
+        fh.write(f"{datetime.now():%H:%M:%S} WAL={_wal_mb():.0f}MB  {text}\n")
+        fh.flush()
+    except Exception:
+        pass
+
+
+def _bound_wal(fh=None) -> None:
+    """重写入步骤之间主动 TRUNCATE,不让 WAL 在一次 daily 里堆到失控(治本,配合看门狗兜底)。"""
+    try:
+        import database as _db
+
+        r = _db.checkpoint("TRUNCATE", wal_threshold_mb=0)
+        _dlog(fh, f"· WAL自限 {r.get('result')}")
+    except Exception as e:
+        _dlog(fh, f"· WAL自限失败 {e}")
+
+
 def run_daily_tasks():
     from datetime import date as dt_date
 
     msg = ""
+    _fh = _open_daily_log()
+    _dlog(_fh, "════ run_daily_tasks 开始 ════")
 
     # ① 批量日行情同步 — 主源 Tushare（按日批量，快且不受 eastmoney 封锁影响）
     #    15:30 紧贴收盘,Tushare 当日日线可能尚未发布：未就绪则等待重试(最多4次×15分钟)
@@ -353,6 +452,7 @@ def run_daily_tasks():
         import subprocess, sys, os
         scripts_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts")
         for attempt in range(1, 5):
+            _dlog(_fh, f"▶ ①行情同步[tushare] 第{attempt}次")
             result = subprocess.run(
                 [sys.executable, os.path.join(scripts_dir, "tushare_bulk_backfill.py"),
                  "--quotes-days", "3", "--skip-financials", "--fund-flow-days", "3"],
@@ -364,9 +464,11 @@ def run_daily_tasks():
                 break
             if attempt < 4:
                 msg += f"当日行情未发布(第{attempt}次),15分钟后重试 "
+                _dlog(_fh, f"· 当日行情未发布,sleep 900s 后重试")
                 time.sleep(900)
         last_line = (result.stdout or "").strip().split("\n")[-1]
         msg += f"行情同步[tushare]({last_line[:80]}) "
+        _bound_wal(_fh)
     except Exception as e:
         msg += f"行情tushare失败:{str(e)[:80]} "
         try:
@@ -392,6 +494,7 @@ def run_daily_tasks():
             ("akshare_sync_market_breadth.py", "市场广度", [], 300),
         ]:
             try:
+                _dlog(_fh, f"▶ ②{label}")
                 r = subprocess.run(
                     [sys.executable, os.path.join(scripts_dir, script)] + extra_args,
                     capture_output=True,
@@ -405,6 +508,7 @@ def run_daily_tasks():
                     msg += f"{label}失败({(r.stderr or tail)[-40:]}) "
             except Exception as e:
                 msg += f"{label}:{str(e)[:40]} "
+        _bound_wal(_fh)
     except Exception as e:
         msg += f"市场特色:{e} "
 
@@ -413,6 +517,7 @@ def run_daily_tasks():
     msg = f"{dt_date.today()}→{today} 自动任务: " + msg
 
     try:
+        _dlog(_fh, "▶ 估值")
         from services.valuation_engine import compute_valuation_scores
 
         r = compute_valuation_scores()
@@ -421,6 +526,7 @@ def run_daily_tasks():
         msg += f"估值:{e} "
 
     try:
+        _dlog(_fh, "▶ 基本面基准")
         from services.factor_percentile_cache import refresh_daily_baseline
 
         r = refresh_daily_baseline()
@@ -429,10 +535,12 @@ def run_daily_tasks():
         msg += f"基本面基准:{e} "
 
     try:
+        _dlog(_fh, "▶ 技术面")
         from services.batch_score_compute import _active_ids, compute_technical
 
         r = compute_technical(_active_ids(None), today)
         msg += f"技术面(filled={r.get('filled', 0)},cache={r.get('from_cache', 0)}) "
+        _bound_wal(_fh)
     except Exception as e:
         msg += f"技术面:{e} "
 
@@ -452,6 +560,7 @@ def run_daily_tasks():
         except sqlite3.OperationalError:
             has_log = False
 
+        _dlog(_fh, "▶ 因子")
         if has_log:
             from services.factor_incremental import compute_factors_incremental
 
@@ -462,10 +571,12 @@ def run_daily_tasks():
 
             r = compute_factors()
             msg += f"因子全量({r.get('factors_computed', 0)}) "
+        _bound_wal(_fh)
     except Exception as e:
         msg += f"因子:{e} "
 
     try:
+        _dlog(_fh, "▶ 因子历史")
         from services.factor_history_expand import expand_factor_history
 
         r = expand_factor_history(days=90)
@@ -474,6 +585,7 @@ def run_daily_tasks():
         msg += f"因子历史:{e} "
 
     try:
+        _dlog(_fh, "▶ 因子保留")
         from services.factor_retention import prune_empty_factors, prune_factor_values
 
         r = prune_factor_values()
@@ -486,6 +598,7 @@ def run_daily_tasks():
         msg += f"因子保留:{e} "
 
     try:
+        _dlog(_fh, "▶ 利息保障")
         from services.financial_backfill import backfill_interest_coverage
 
         r = backfill_interest_coverage()
@@ -494,6 +607,7 @@ def run_daily_tasks():
         msg += f"利息保障:{e} "
 
     try:
+        _dlog(_fh, "▶ 因子合成")
         from services.factor_merge_preset import run_preset_merges
 
         r = run_preset_merges()
@@ -505,6 +619,7 @@ def run_daily_tasks():
         msg += f"因子合成:{e} "
 
     try:
+        _dlog(_fh, "▶ 评分历史")
         from services.score_history_expand import expand_score_history
 
         r = expand_score_history(days=90)
@@ -513,6 +628,7 @@ def run_daily_tasks():
         msg += f"评分历史:{e} "
 
     try:
+        _dlog(_fh, "▶ 主力流")
         from services.fund_flow_sync import sync_stock_fund_flow
 
         ff = sync_stock_fund_flow()
@@ -521,32 +637,38 @@ def run_daily_tasks():
         msg += f"主力流:{e} "
 
     try:
+        _dlog(_fh, "▶ 资金")
         from services.capital_scorer import compute_all_capital
 
         results = compute_all_capital(today)
         n = _persist_dimension_rows("capital_scores", results)
         synced = _sync_to_comprehensive("capital_scores", "capital_score", today)
         msg += f"资金({n},同步{synced}) "
+        _bound_wal(_fh)
     except Exception as e:
         msg += f"资金:{e} "
 
     try:
+        _dlog(_fh, "▶ 情绪")
         from services.sentiment_scorer import compute_all_sentiment
 
         results = compute_all_sentiment(today)
         n = _persist_dimension_rows("sentiment_scores", results)
         synced = _sync_to_comprehensive("sentiment_scores", "mood_score", today)
         msg += f"情绪({n},同步{synced}) "
+        _bound_wal(_fh)
     except Exception as e:
         msg += f"情绪:{e} "
 
     try:
+        _dlog(_fh, "▶ 政策同步")
         synced = _sync_to_comprehensive("policy_scores", "policy_score", today)
         msg += f"政策同步({synced}) "
     except Exception as e:
         msg += f"政策同步:{e} "
 
     try:
+        _dlog(_fh, "▶ ML训练")
         from services.ml_predictions import run_qlib_train_job, sync_ml_to_comprehensive
 
         tr = run_qlib_train_job({"train_days": 120})
@@ -560,6 +682,7 @@ def run_daily_tasks():
         msg += f"ML:{e} "
 
     try:
+        _dlog(_fh, "▶ DB快照")
         import os
         import subprocess
 
@@ -572,6 +695,7 @@ def run_daily_tasks():
         msg += f"DB快照:{e} "
 
     try:
+        _dlog(_fh, "▶ 备份")
         import database as db
 
         db.backup()
@@ -580,6 +704,7 @@ def run_daily_tasks():
         msg += f"备份失败:{e} "
 
     try:
+        _dlog(_fh, "▶ V5日常")
         from services.v5_data_sync import sync_v5_daily
 
         v5 = sync_v5_daily()
@@ -592,6 +717,7 @@ def run_daily_tasks():
         msg += f"V5日常:{e} "
 
     try:
+        _dlog(_fh, "▶ 宏观")
         from services.macro_sync import sync_macro_indicators
 
         sync_macro_indicators()
@@ -604,6 +730,7 @@ def run_daily_tasks():
         from services.comprehensive import sync_all_dimensions
         from services.score_gap_scanner import scan_gaps
 
+        _dlog(_fh, "▶ 维度同步")
         ok, reason = can_run_sync()
         if not ok:
             logger.info("[Scheduler] skip sync_all_dimensions: %s", reason)
@@ -620,10 +747,12 @@ def run_daily_tasks():
                 msg += f"维度同步({sync_result.get('affected_stocks', 0)}股) "
             else:
                 msg += "维度同步(无缺口) "
+        _bound_wal(_fh)
     except Exception as e:
         msg += f"维度同步:{e} "
 
     try:
+        _dlog(_fh, "▶ 模拟盘快照/入队")
         from services.portfolio_svc import (
             queue_momentum_crashes,
             queue_scheduled_rebalances,
@@ -646,6 +775,7 @@ def run_daily_tasks():
         msg += f"模拟盘:{e} "
 
     try:
+        _dlog(_fh, "▶ 因子分析预热")
         from services.factor_analysis_cache import warm_all
 
         r = warm_all(forward_days=20)
@@ -653,5 +783,11 @@ def run_daily_tasks():
     except Exception as e:
         msg += f"因子分析预热:{e} "
 
+    _dlog(_fh, f"════ run_daily_tasks 结束 ════\n{msg}")
+    if _fh is not None:
+        try:
+            _fh.close()
+        except Exception:
+            pass
     logger.info("[Scheduler] %s", msg)
     return msg
