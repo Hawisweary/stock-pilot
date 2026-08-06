@@ -30,7 +30,7 @@ _STATE_FILE = os.path.join(DATA_DIR, "scheduler_state.json")
 # ——止损优先。被杀的那一步未提交事务自动作废(SQLite WAL 语义),已提交步骤全部保留。
 _WAL_SOFT_CAP_MB = 512
 _WAL_HARD_CAP_MB = 8192
-_running_procs: dict = {}          # pid -> (Popen, job_label)
+_running_procs: dict = {}          # pid -> {"proc","label","deadline"}
 _procs_lock = threading.Lock()
 
 
@@ -42,41 +42,72 @@ def _wal_mb() -> float:
         return 0.0
 
 
+def _kill_proc_tree(proc, label: str) -> bool:
+    """强杀子进程及其整个进程组(孙进程 tushare/qlib 也一并带走)。
+    子进程以 start_new_session=True 起,自成进程组,os.killpg 才能连根拔。"""
+    import signal
+
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        return True
+    except Exception:
+        try:
+            proc.kill()  # 退化:至少杀直接子进程
+            return True
+        except Exception as e:
+            logger.warning("[看门狗] 杀 %s 失败: %s", label, e)
+            return False
+
+
 def _kill_running_jobs(reason: str) -> list[str]:
     killed = []
     with _procs_lock:
-        for pid, (proc, label) in list(_running_procs.items()):
-            try:
-                proc.kill()
-                killed.append(f"{label}(pid={pid})")
-            except Exception as e:
-                logger.warning("[WAL看门狗] 杀 %s 失败: %s", label, e)
+        for pid, info in list(_running_procs.items()):
+            if _kill_proc_tree(info["proc"], info["label"]):
+                killed.append(f"{info['label']}(pid={pid})")
     if killed:
-        logger.error("[WAL看门狗] %s → 强杀: %s", reason, ", ".join(killed))
+        logger.error("[看门狗] %s → 强杀: %s", reason, ", ".join(killed))
     return killed
 
 
 def _wal_watchdog_loop():
-    """独立线程:每 60s 查 WAL 大小。软顶主动 TRUNCATE;硬顶强杀调度子进程再 TRUNCATE。
-    必须独立于调度主循环——主循环在 subprocess 阻塞期间(可长达数小时)无法自查,
-    正是上次 WAL 涨到 158GB 无人干预的根因。"""
+    """独立线程,每 60s 巡检两件事——不受调度主循环在 subprocess 阻塞期间无法自查的影响
+    (那正是上次 WAL 涨到 158GB 无人干预的根因):
+    ① WAL:软顶主动 TRUNCATE;硬顶强杀在跑作业再 TRUNCATE。
+    ② 作业超时:communicate(timeout) 这次实测未能杀掉 6h 的作业,故用独立 deadline 巡检兜底
+       ——任何登记作业超过 deadline 就 killpg 整个进程组(可靠,不依赖 communicate 行为)。"""
     import database as _db
 
     while True:
         time.sleep(60)
         try:
+            # ② 超时兜底:先查有没有作业跑过头
+            now = time.time()
+            overdue = []
+            with _procs_lock:
+                for pid, info in list(_running_procs.items()):
+                    if now > info["deadline"]:
+                        overdue.append(info)
+            for info in overdue:
+                _kill_proc_tree(info["proc"], info["label"])
+                logger.error(
+                    "[看门狗] 作业 %s 超时(>%ds)→ 强杀进程组",
+                    info["label"], info["deadline_sec"],
+                )
+
+            # ① WAL 上限
             wal = _wal_mb()
             if wal >= _WAL_HARD_CAP_MB:
                 _kill_running_jobs(f"WAL={wal:.0f}MB≥硬顶{_WAL_HARD_CAP_MB}MB")
                 time.sleep(2)  # 等写进程真正退出,TRUNCATE 才能拿到无写者的库
                 r = _db.checkpoint("TRUNCATE", wal_threshold_mb=0)
-                logger.error("[WAL看门狗] 硬顶后 TRUNCATE: %s", r)
+                logger.error("[看门狗] 硬顶后 TRUNCATE: %s", r)
             elif wal >= _WAL_SOFT_CAP_MB:
                 r = _db.checkpoint("TRUNCATE", wal_threshold_mb=0)
                 if not r.get("skipped"):
-                    logger.info("[WAL看门狗] 软顶 TRUNCATE (WAL=%.0fMB): %s", wal, r)
+                    logger.info("[看门狗] 软顶 TRUNCATE (WAL=%.0fMB): %s", wal, r)
         except Exception as e:
-            logger.warning("[WAL看门狗] 检查失败: %s", e)
+            logger.warning("[看门狗] 检查失败: %s", e)
 
 
 def _write_state_file(state: dict) -> None:
@@ -154,19 +185,26 @@ def _run_job_subprocess(job: str, timeout_sec: int) -> str:
         "scripts",
         "run_scheduled_job.py",
     )
-    # 用 Popen + 登记表,让 WAL 看门狗线程能在 WAL 失控时强杀本子进程
+    # 用 Popen + 登记表(带 deadline),让看门狗线程能在 WAL 失控或作业超时时强杀。
+    # start_new_session=True:子进程自成进程组,孙进程(tushare/qlib)才能被 killpg 连根拔。
     proc = subprocess.Popen(
         [sys.executable, script, job],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        start_new_session=True,
     )
     with _procs_lock:
-        _running_procs[proc.pid] = (proc, job)
+        _running_procs[proc.pid] = {
+            "proc": proc, "label": job,
+            "deadline": time.time() + timeout_sec, "deadline_sec": timeout_sec,
+        }
     try:
+        # communicate(timeout) 作首道防线;但实测它曾未能杀掉超时作业,
+        # 故真正的兜底是看门狗线程按 deadline 巡检 killpg(见 _wal_watchdog_loop)。
         stdout, stderr = proc.communicate(timeout=timeout_sec)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        _kill_proc_tree(proc, job)
         stdout, stderr = proc.communicate()
         raise RuntimeError(f"timeout after {timeout_sec}s")
     finally:
@@ -580,7 +618,10 @@ def run_daily_tasks():
         from services.factor_history_expand import expand_factor_history
 
         r = expand_factor_history(days=90)
-        msg += f"因子历史({r.get('factor_history_days', 0)}天) "
+        msg += (
+            f"因子历史({r.get('factor_history_days', 0)}天,"
+            f"算{r.get('computed_days', '?')}/跳{r.get('skipped_days', '?')}) "
+        )
     except Exception as e:
         msg += f"因子历史:{e} "
 
@@ -623,7 +664,10 @@ def run_daily_tasks():
         from services.score_history_expand import expand_score_history
 
         r = expand_score_history(days=90)
-        msg += f"评分历史({r.get('score_history_days', 0)}天) "
+        msg += (
+            f"评分历史({r.get('score_history_days', 0)}天,"
+            f"算{r.get('computed_days', '?')}/跳{r.get('skipped_days', '?')}) "
+        )
     except Exception as e:
         msg += f"评分历史:{e} "
 

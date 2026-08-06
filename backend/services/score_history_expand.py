@@ -71,12 +71,38 @@ def expand_score_history(days: int = 90, db_path: str = None) -> dict:
     ]
     trade_dates = sorted(trade_dates)
     stocks = conn.execute("SELECT id FROM stocks WHERE is_active=1").fetchall()
+    active_n = len(stocks)
 
-    ff_writes = _forward_fill_score_factors(conn, trade_dates)
+    # 增量(收敛式):原来每天把 90天×5292 只全量重算,且整段只在末尾 commit 一次
+    # (单个巨型长写事务→持写锁数十分钟→database is locked)。
+    # 老历史日的 comprehensive_scores 天然稀疏(早期上市股少/维度数据缺),永远达不到某个
+    # 绝对阈值,若按阈值判定会每天重算这些老日期、永不收敛。而重算已有记录的老日只是
+    # COALESCE 空写(源维度数据不变)。故策略:已有任何记录的老日期直接跳过;只强制重算
+    # 最近 RECENT_KEEP 天(接新维度数据)+ 真正一行都没有的空缺日。稳态下只算 ~几天。
+    _ = active_n  # 保留(未来若改回阈值法)
+    RECENT_KEEP = 5
+    recent = set(trade_dates[-RECENT_KEEP:])
+    covered = dict(
+        conn.execute(
+            "SELECT calc_date, COUNT(*) FROM comprehensive_scores WHERE calc_date>=? GROUP BY calc_date",
+            (trade_dates[0],),
+        ).fetchall()
+    ) if trade_dates else {}
+    # "史前"空缺日(早于最早有分之日)源维度数据根本不存在,算了也 insert 不出东西,
+    # 却每次白扫 5292 只 → 永不收敛。只补:①覆盖区间内的真空洞 ②最近 RECENT_KEEP 天。
+    first_covered = next((d for d in trade_dates if covered.get(d, 0) > 0), None)
+    todo_dates = [
+        d for d in trade_dates
+        if d in recent
+        or (first_covered is not None and d >= first_covered and covered.get(d, 0) == 0)
+    ]
+    skipped_days = len(trade_dates) - len(todo_dates)
+
+    ff_writes = _forward_fill_score_factors(conn, todo_dates)
 
     inserted = 0
     updated = 0
-    for dt in trade_dates:
+    for dt in todo_dates:
         for (sid,) in stocks:
             existing = conn.execute(
                 "SELECT id FROM comprehensive_scores WHERE stock_id=? AND calc_date=?",
@@ -155,6 +181,12 @@ def expand_score_history(days: int = 90, db_path: str = None) -> dict:
                     (sid, dt, *vals),
                 )
                 inserted += 1
+        # 每交易日提交,避免持整个 90 天长写事务(曾致 database is locked + WAL 膨胀)
+        conn.commit()
+        try:
+            conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        except sqlite3.OperationalError:
+            pass
 
     score_days = conn.execute("SELECT COUNT(DISTINCT calc_date) FROM comprehensive_scores").fetchone()[0]
 
@@ -166,6 +198,8 @@ def expand_score_history(days: int = 90, db_path: str = None) -> dict:
 
     return {
         "trade_dates_processed": len(trade_dates),
+        "computed_days": len(todo_dates),
+        "skipped_days": skipped_days,
         "inserted": inserted,
         "updated": updated,
         "score_history_days": score_days,
