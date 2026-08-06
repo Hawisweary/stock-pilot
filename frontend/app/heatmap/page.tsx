@@ -20,12 +20,13 @@ const DIM_CN: Record<string, string> = {
 };
 
 type HeatRow = Record<string, string | number | null | undefined> & {
-  stock_id: number; code: string; name: string; industry_sw?: string;
+  stock_id: number; code: string; name: string; industry?: string;
 };
 
 export default function HeatmapPage() {
   const [data, setData] = useState<{ dims: string[]; matrix: HeatRow[] } | null>(null);
-  const [activeDim, setActiveDim] = useState("composite_v5");
+  // 后端返回中文维度 key(基本面/…/V5综合)+ industry 字段;默认选综合分
+  const [activeDim, setActiveDim] = useState("V5综合");
   const [selected, setSelected] = useState<HeatRow | null>(null);
   const router = useRouter();
 
@@ -41,7 +42,7 @@ export default function HeatmapPage() {
     if (!data?.matrix.length) return [];
     const map = new Map<string, HeatRow[]>();
     for (const row of data.matrix) {
-      const ind = (row.industry_sw as string) || "其他";
+      const ind = (row.industry as string) || "其他";
       const arr = map.get(ind) ?? [];
       arr.push(row);
       map.set(ind, arr);
@@ -68,7 +69,7 @@ export default function HeatmapPage() {
 
   if (!data) return <div className="animate-pulse h-96 bg-muted rounded" />;
 
-  const dims = data.dims.length ? data.dims : ["composite_v5"];
+  const dims = data.dims.length ? data.dims : ["V5综合"];
 
   return (
     <div className="space-y-4">
