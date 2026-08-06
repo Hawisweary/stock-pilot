@@ -213,6 +213,10 @@ BATCH_FILL_MAX_CONCURRENT = int(os.getenv("AFR_BATCH_FILL_MAX_CONCURRENT", "1"))
 P2_PARALLEL_ENABLED = env_bool("AFR_P2_PARALLEL", True)
 JOB_STALE_TIMEOUT_MIN = int(os.getenv("AFR_JOB_STALE_TIMEOUT_MIN", "10"))
 QLIB_ENABLED = env_bool("AFR_QLIB_ENABLED", False)
+# daily 里是否自动训练 ML：默认关。运行时 env 可能开着 AFR_QLIB_ENABLED(供按需/on-demand),
+# 但预测消费长期 force-off 时,每天自动训练纯浪费(实测跑到 900s 超时)。此开关独立控制
+# "daily 自动训练",默认跳过省时;需要时置 AFR_ML_DAILY_TRAIN=true 恢复。
+ML_DAILY_TRAIN = env_bool("AFR_ML_DAILY_TRAIN", False)
 RUST_BACKTEST_APPROVED = env_bool("AFR_RUST_BACKTEST_APPROVED", False)
 # ML 预测消费：未设置 env 时走 OOS RankIC 指标门控（见 services/ml_gate.py）
 _qlib_pred_raw = os.getenv("AFR_QLIB_PREDICTIONS_APPROVED")

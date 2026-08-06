@@ -713,15 +713,21 @@ def run_daily_tasks():
 
     try:
         _dlog(_fh, "▶ ML训练")
-        from services.ml_predictions import run_qlib_train_job, sync_ml_to_comprehensive
+        from config import ML_DAILY_TRAIN
 
-        tr = run_qlib_train_job({"train_days": 120})
-        if tr.get("status") == "done":
-            sy = sync_ml_to_comprehensive()
-            n_models = len(tr.get("models") or [])
-            msg += f"ML(h{tr.get('horizons',[])},{n_models}模型,{sy.get('updated', 0)}股) "
+        if not ML_DAILY_TRAIN:
+            # 默认跳过:预测消费长期 force-off,每天训练只会跑到 900s 超时白耗(见 config)
+            msg += "ML训练:跳过(AFR_ML_DAILY_TRAIN=false) "
         else:
-            msg += f"ML:{tr.get('reason', tr.get('status'))} "
+            from services.ml_predictions import run_qlib_train_job, sync_ml_to_comprehensive
+
+            tr = run_qlib_train_job({"train_days": 120})
+            if tr.get("status") == "done":
+                sy = sync_ml_to_comprehensive()
+                n_models = len(tr.get("models") or [])
+                msg += f"ML(h{tr.get('horizons',[])},{n_models}模型,{sy.get('updated', 0)}股) "
+            else:
+                msg += f"ML:{tr.get('reason', tr.get('status'))} "
     except Exception as e:
         msg += f"ML:{e} "
 
