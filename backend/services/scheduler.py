@@ -550,6 +550,16 @@ def run_daily_tasks():
     except Exception as e:
         msg += f"市场特色:{e} "
 
+    # 同花顺当日强势股归因(市场页热点)。此前从未接入调度→ths_hotspots 停更数月。
+    try:
+        _dlog(_fh, "▶ 同花顺热点")
+        from services.astock_data import sync_ths_hotspots
+
+        r = sync_ths_hotspots()
+        msg += f"同花顺热点({r.get('error') or r.get('count', 0)}) "
+    except Exception as e:
+        msg += f"同花顺热点:{str(e)[:40]} "
+
     # 目标日期必须在行情同步之后解析，否则全流程按旧交易日计算
     today = latest_trading_date()
     msg = f"{dt_date.today()}→{today} 自动任务: " + msg

@@ -87,13 +87,30 @@ def fetch_lhb_period_stats(period: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _ak_retry(fn, tries: int = 3, delay: float = 1.5):
+    """akshare 下载偶发 BadZipFile / 网络抖动 → 短重试。
+    深交所 stock_szse_summary 拉的 Excel 时不时不是合法 zip,单次撞上就整步失败
+    (曾致市场总貌卡住数日);实测重试一次即可救回。"""
+    import time as _t
+
+    last: Exception | None = None
+    for i in range(tries):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001 - akshare 抛的异常类型多样,统一重试
+            last = e
+            if i < tries - 1:
+                _t.sleep(delay)
+    raise last  # type: ignore[misc]
+
+
 def fetch_market_summary() -> list[dict[str, Any]]:
     """沪深交易所市场总貌（上市公司数/总市值/流通市值/平均市盈率/成交额）。"""
     import akshare as ak
 
     rows: list[dict[str, Any]] = []
 
-    sse = ak.stock_sse_summary()
+    sse = _ak_retry(ak.stock_sse_summary)
     if sse is not None and not sse.empty:
         idx = sse.set_index("项目")
         trade_date = str(idx.loc["报告时间"].iloc[0]) if "报告时间" in idx.index else None
@@ -111,7 +128,7 @@ def fetch_market_summary() -> list[dict[str, Any]]:
                 "pe_avg": _to_float(idx.loc["平均市盈率", cat_col]) if "平均市盈率" in idx.index else None,
             })
 
-    szse = ak.stock_szse_summary()
+    szse = _ak_retry(ak.stock_szse_summary)
     if szse is not None and not szse.empty:
         # stock_szse_summary 原始单位是"元"，stock_sse_summary 已经是"亿元"，
         # 这里统一换算成亿元，避免同一张表两个交易所的 total_mv/circ_mv 量级差 1e8。
