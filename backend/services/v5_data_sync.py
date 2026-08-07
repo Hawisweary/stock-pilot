@@ -361,7 +361,16 @@ def sync_v5_daily(stock_ids: list[int] | None = None) -> dict:
 
 def sync_v5_nightly_fetch(stock_ids: list[int] | None = None) -> dict:
     """夜间：抓取公告/新闻 + 全量规则/LLM 分类，不重算 V5 分数。"""
-    return sync_v5_data_sources(stock_ids=stock_ids, mode="nightly")
+    result = sync_v5_data_sources(stock_ids=stock_ids, mode="nightly")
+    # 全局政策快照（LLM 分批扫描）。放在新闻抓取之后，读到当晚最新新闻；此前从未接入调度
+    # → policy_snapshot 停更数月。LLM 重且可能失败，失败只记录不阻塞夜间流程。
+    try:
+        from services.policy_global import global_policy_scan
+
+        result["policy_snapshot"] = global_policy_scan()
+    except Exception as e:
+        result["policy_snapshot"] = {"error": str(e)}
+    return result
 
 
 def sync_v5_weekly(stock_ids: list[int] | None = None) -> dict:
