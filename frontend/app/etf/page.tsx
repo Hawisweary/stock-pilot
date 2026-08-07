@@ -37,15 +37,18 @@ export default function EtfPage() {
   const [asOf, setAsOf] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<Sort>("amount");
+  const [page, setPage] = useState(0);
+  const PAGE = 100;
 
   const load = useCallback(() => {
-    const params = new URLSearchParams({ sort, limit: "300" });
+    const params = new URLSearchParams({ sort, limit: "2000" });
     if (q.trim()) params.set("q", q.trim());
     fetch(`/api/etf/list?${params}`)
       .then((r) => r.json())
       .then((d) => {
         setRows(d.etfs ?? []);
         setAsOf(d.as_of ?? null);
+        setPage(0);
       })
       .catch(() => setRows([]));
   }, [q, sort]);
@@ -54,6 +57,10 @@ export default function EtfPage() {
     const t = setTimeout(load, 250);
     return () => clearTimeout(t);
   }, [load]);
+
+  const total = rows?.length ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE));
+  const pageRows = rows ? rows.slice(page * PAGE, (page + 1) * PAGE) : [];
 
   const SORTS: { id: Sort; label: string }[] = [
     { id: "amount", label: "成交额" },
@@ -114,7 +121,7 @@ export default function EtfPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {pageRows.map((r) => (
                 <tr key={r.code} className="border-t border-border hover:bg-accent/40">
                   <td className="px-3 py-1.5 font-mono text-xs tabular-nums">{r.code}</td>
                   <td className="px-3 py-1.5">{r.name}</td>
@@ -140,6 +147,31 @@ export default function EtfPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {rows && total > PAGE && (
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>
+            第 {page * PAGE + 1}–{Math.min((page + 1) * PAGE, total)} / 共 {total} 只
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="px-2.5 py-1 rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              上一页
+            </button>
+            <span className="tabular-nums">{page + 1} / {pageCount}</span>
+            <button
+              onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+              disabled={page >= pageCount - 1}
+              className="px-2.5 py-1 rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              下一页
+            </button>
+          </div>
         </div>
       )}
     </div>
