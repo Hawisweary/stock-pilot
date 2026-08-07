@@ -36,6 +36,7 @@ def register_blueprints(app: FastAPI):
     from api.alerts import router as alerts_router
     from api.screener import router as screener_router
     from api.calendar import router as calendar_router
+    from api.etf import router as etf_router
 
     # 核心
     app.include_router(risk_router)
@@ -43,6 +44,7 @@ def register_blueprints(app: FastAPI):
     app.include_router(alerts_router)
     app.include_router(screener_router)
     app.include_router(calendar_router)
+    app.include_router(etf_router)
     app.include_router(stocks_router)
     app.include_router(data_router)
     app.include_router(financials_router)

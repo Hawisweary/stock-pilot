@@ -1032,3 +1032,78 @@ def fetch_margin_detail(trade_date: str) -> dict[str, dict[str, Any]]:
             "rzrqye": _f(r.get("rzrqye")),
         }
     return result
+
+
+def fetch_new_share(start_date: str, end_date: str) -> list[dict[str, Any]]:
+    """IPO 新股上市列表。start_date/end_date 格式 YYYYMMDD。返回已上市新股列表（含 issue_date）。"""
+    df = _call_with_retry(lambda: _pro().new_share(start_date=start_date, end_date=end_date))
+    if df is None or df.empty:
+        return []
+    rows = []
+    for _, r in df.iterrows():
+        rows.append({
+            "ts_code": str(r.get("ts_code", "")),
+            "sub_code": str(r.get("sub_code") or ""),
+            "name": str(r.get("name") or ""),
+            "ipo_date": _fmt_date(r.get("ipo_date")),
+            "issue_date": _fmt_date(r.get("issue_date")),
+            "amount": _f(r.get("amount")),
+            "market_amount": _f(r.get("market_amount")),
+            "price": _f(r.get("price")),
+            "pe": _f(r.get("pe")),
+            "limit_amount": _f(r.get("limit_amount")),
+            "funds": _f(r.get("funds")),
+            "ballot": _f(r.get("ballot")),
+        })
+    return rows
+
+
+# ── ETF（场内基金）───────────────────────────────────────────────
+def fetch_etf_list() -> list[dict[str, Any]]:
+    """场内 ETF 列表（fund_basic market='E'，筛名称含 ETF 且在市 status='L'）。"""
+    pro = _pro()
+    _throttle()
+    df = pro.fund_basic(market="E")
+    if df is None or df.empty:
+        return []
+    df = df[df["name"].str.contains("ETF", na=False)]
+    if "status" in df.columns:
+        df = df[df["status"] == "L"]
+    rows: list[dict[str, Any]] = []
+    for _, r in df.iterrows():
+        ts_code = str(r["ts_code"])
+        rows.append({
+            "ts_code": ts_code,
+            "code": ts_code.split(".")[0],
+            "name": r.get("name"),
+            "management": r.get("management"),
+            "fund_type": r.get("fund_type"),
+            "invest_type": r.get("invest_type"),
+            "list_date": r.get("list_date"),
+        })
+    return rows
+
+
+def fetch_etf_quotes(trade_date: str) -> list[dict[str, Any]]:
+    """某交易日全场内基金日线（fund_daily by trade_date，含 ETF）。trade_date=YYYYMMDD。"""
+    pro = _pro()
+    _throttle()
+    df = pro.fund_daily(trade_date=trade_date)
+    if df is None or df.empty:
+        return []
+    rows: list[dict[str, Any]] = []
+    for _, r in df.iterrows():
+        rows.append({
+            "ts_code": str(r["ts_code"]),
+            "trade_date": str(r["trade_date"]),
+            "open": _f(r.get("open")),
+            "high": _f(r.get("high")),
+            "low": _f(r.get("low")),
+            "close": _f(r.get("close")),
+            "pre_close": _f(r.get("pre_close")),
+            "change": _f(r.get("change")),
+            "pct_chg": _f(r.get("pct_chg")),
+            "vol": _f(r.get("vol")),
+            "amount": _f(r.get("amount")),
+        })
+    return rows
