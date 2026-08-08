@@ -1107,3 +1107,62 @@ def fetch_etf_quotes(trade_date: str) -> list[dict[str, Any]]:
             "amount": _f(r.get("amount")),
         })
     return rows
+
+
+def fetch_etf_info(ts_code: str) -> dict[str, Any] | None:
+    """单只 ETF 静态信息（fund_basic 全字段挑常用的）。"""
+    pro = _pro()
+    _throttle()
+    df = pro.fund_basic(ts_code=ts_code)
+    if df is None or df.empty:
+        return None
+    r = df.iloc[0]
+
+    def s(k):
+        v = r.get(k)
+        return None if v is None or (isinstance(v, float) and v != v) else str(v)
+
+    return {
+        "ts_code": s("ts_code"), "name": s("name"),
+        "management": s("management"), "custodian": s("custodian"),
+        "fund_type": s("fund_type"), "invest_type": s("invest_type"),
+        "benchmark": s("benchmark"),
+        "m_fee": _f(r.get("m_fee")), "c_fee": _f(r.get("c_fee")),
+        "issue_amount": _f(r.get("issue_amount")),
+        "found_date": s("found_date"), "list_date": s("list_date"),
+    }
+
+
+def fetch_etf_nav(ts_code: str, start: str, end: str) -> list[dict[str, Any]]:
+    """ETF 净值序列（fund_nav）：单位净值/累计净值/规模。"""
+    pro = _pro()
+    _throttle()
+    df = pro.fund_nav(ts_code=ts_code, start_date=start, end_date=end)
+    if df is None or df.empty:
+        return []
+    out = []
+    for _, r in df.iterrows():
+        out.append({
+            "nav_date": str(r.get("nav_date")),
+            "unit_nav": _f(r.get("unit_nav")),
+            "accum_nav": _f(r.get("accum_nav")),
+            "net_asset": _f(r.get("net_asset")),
+        })
+    return out
+
+
+def fetch_etf_portfolio_latest(ts_code: str, top: int = 10) -> dict[str, Any]:
+    """ETF 最新披露期的前 N 大重仓（fund_portfolio 取 MAX(end_date)）。"""
+    pro = _pro()
+    _throttle()
+    df = pro.fund_portfolio(ts_code=ts_code)
+    if df is None or df.empty:
+        return {"end_date": None, "holdings": []}
+    latest = df["end_date"].max()
+    sub = df[df["end_date"] == latest].sort_values("stk_mkv_ratio", ascending=False).head(top)
+    holdings = [{
+        "symbol": str(r.get("symbol")),
+        "ratio": _f(r.get("stk_mkv_ratio")),
+        "mkv": _f(r.get("mkv")),
+    } for _, r in sub.iterrows()]
+    return {"end_date": str(latest), "holdings": holdings}

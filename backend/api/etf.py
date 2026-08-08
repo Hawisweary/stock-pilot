@@ -41,3 +41,79 @@ async def etf_list(
     ).fetchall()
 
     return {"as_of": latest, "count": len(rows), "etfs": [dict(r) for r in rows]}
+
+
+@router.get("/{code}")
+async def etf_detail(code: str):
+    """单只 ETF 详情：信息卡(fund_basic) + 行情(本地) + 净值/折溢价(fund_nav) + 前十大持仓(fund_portfolio)。
+    各区块独立容错：某个 Tushare 接口挂了不影响其余。"""
+    from datetime import date, timedelta
+
+    from database import get as get_db_conn
+    from services.tushare_adapter import (
+        fetch_etf_info,
+        fetch_etf_nav,
+        fetch_etf_portfolio_latest,
+    )
+
+    conn = get_db_conn()
+    e = conn.execute(
+        "SELECT ts_code, code, name, management, fund_type, invest_type, list_date "
+        "FROM etfs WHERE code=?",
+        (code,),
+    ).fetchone()
+    if not e:
+        return {"error": "未找到该 ETF"}
+    ts_code = e["ts_code"]
+
+    result: dict = {"code": code, "ts_code": ts_code, "name": e["name"]}
+
+    # 行情（本地已同步，取近 120 交易日）
+    q = conn.execute(
+        "SELECT trade_date, close, pct_chg, vol, amount FROM etf_daily_quotes "
+        "WHERE ts_code=? ORDER BY trade_date DESC LIMIT 120",
+        (ts_code,),
+    ).fetchall()
+    quotes = [dict(r) for r in reversed(q)]
+    result["quotes"] = quotes
+    last_close = quotes[-1]["close"] if quotes else None
+
+    # 信息卡（实时 fund_basic）
+    try:
+        result["info"] = fetch_etf_info(ts_code) or {}
+    except Exception as ex:  # noqa: BLE001
+        result["info"] = {"error": str(ex)[:80]}
+
+    # 净值 + 折溢价（实时 fund_nav，取近 60 天，用最新单位净值对最新收盘价）
+    try:
+        end = date.today().strftime("%Y%m%d")
+        start = (date.today() - timedelta(days=60)).strftime("%Y%m%d")
+        nav = fetch_etf_nav(ts_code, start, end)
+        navs = sorted((n for n in nav if n.get("unit_nav")), key=lambda x: x["nav_date"])
+        result["nav"] = navs
+        if navs and last_close:
+            un = navs[-1]["unit_nav"]
+            result["nav_latest"] = navs[-1]
+            result["premium_pct"] = round((last_close / un - 1) * 100, 3) if un else None
+    except Exception as ex:  # noqa: BLE001
+        result["nav"] = {"error": str(ex)[:80]}
+
+    # 前十大持仓（实时 fund_portfolio，补股票名）
+    try:
+        pf = fetch_etf_portfolio_latest(ts_code, top=10)
+        syms = [(h.get("symbol") or "").split(".")[0] for h in pf.get("holdings", [])]
+        syms = [s for s in syms if s]
+        namemap: dict = {}
+        if syms:
+            ph = ",".join("?" for _ in syms)
+            for c2, nm in conn.execute(
+                f"SELECT code, name FROM stocks WHERE code IN ({ph})", syms
+            ):
+                namemap[c2] = nm
+        for h in pf.get("holdings", []):
+            h["name"] = namemap.get((h.get("symbol") or "").split(".")[0])
+        result["portfolio"] = pf
+    except Exception as ex:  # noqa: BLE001
+        result["portfolio"] = {"error": str(ex)[:80]}
+
+    return result

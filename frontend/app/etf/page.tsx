@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 
 type EtfRow = {
   code: string;
@@ -33,6 +34,7 @@ function fmtAmount(v?: number | null) {
 }
 
 export default function EtfPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<EtfRow[] | null>(null);
   const [asOf, setAsOf] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -122,7 +124,11 @@ export default function EtfPage() {
             </thead>
             <tbody>
               {pageRows.map((r) => (
-                <tr key={r.code} className="border-t border-border hover:bg-accent/40">
+                <tr
+                  key={r.code}
+                  onClick={() => router.push(`/etf/${r.code}`)}
+                  className="border-t border-border hover:bg-accent/40 cursor-pointer"
+                >
                   <td className="px-3 py-1.5 font-mono text-xs tabular-nums">{r.code}</td>
                   <td className="px-3 py-1.5">{r.name}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
