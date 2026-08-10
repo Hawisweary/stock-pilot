@@ -12,9 +12,11 @@ _SORT_COLS = {"amount": "q.amount", "pct_chg": "q.pct_chg", "close": "q.close"}
 async def etf_list(
     q: str | None = Query(None, description="按代码/名称模糊搜索"),
     sort: str = Query("amount", description="排序字段: amount|pct_chg|close"),
+    category: str | None = Query(None, description="一级分类: 宽基|行业|主题|风格策略|QDII|其他"),
+    repr_only: bool = Query(False, description="只看聚类去重后的代表"),
     limit: int = Query(200, ge=1, le=2000),
 ):
-    """ETF 列表（含最新交易日行情）。"""
+    """ETF 列表（含最新交易日行情 + 一级分类 + 去重代表标记）。"""
     from database import get as get_db_conn
 
     conn = get_db_conn()
@@ -27,10 +29,16 @@ async def etf_list(
     if q:
         where.append("(e.code LIKE ? OR e.name LIKE ?)")
         params += [f"%{q}%", f"%{q}%"]
+    if category:
+        where.append("e.category=?")
+        params.append(category)
+    if repr_only:
+        where.append("e.is_repr=1")
     params.append(limit)
 
     rows = conn.execute(
         f"""SELECT e.code, e.name, e.management, e.fund_type, e.invest_type, e.list_date,
+                   e.category, e.is_repr, e.cluster_id,
                    q.close, q.pct_chg, q.change, q.vol, q.amount, q.trade_date
             FROM etfs e
             LEFT JOIN etf_daily_quotes q ON q.ts_code=e.ts_code AND q.trade_date=?
@@ -40,7 +48,18 @@ async def etf_list(
         params,
     ).fetchall()
 
-    return {"as_of": latest, "count": len(rows), "etfs": [dict(r) for r in rows]}
+    # 分类分布（给前端做筛选 chip）
+    cats = conn.execute(
+        "SELECT category, COUNT(*) n, SUM(is_repr) reps FROM etfs "
+        "WHERE is_active=1 AND category IS NOT NULL GROUP BY category"
+    ).fetchall()
+
+    return {
+        "as_of": latest,
+        "count": len(rows),
+        "etfs": [dict(r) for r in rows],
+        "categories": [dict(c) for c in cats],
+    }
 
 
 @router.get("/{code}")

@@ -9,6 +9,9 @@ type EtfRow = {
   fund_type?: string;
   invest_type?: string;
   list_date?: string;
+  category?: string | null;
+  is_repr?: number | null;
+  cluster_id?: number | null;
   close?: number | null;
   pct_chg?: number | null;
   change?: number | null;
@@ -39,21 +42,27 @@ export default function EtfPage() {
   const [asOf, setAsOf] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<Sort>("amount");
+  const [category, setCategory] = useState<string>("");
+  const [reprOnly, setReprOnly] = useState(false);
+  const [cats, setCats] = useState<{ category: string; n: number; reps: number }[]>([]);
   const [page, setPage] = useState(0);
   const PAGE = 100;
 
   const load = useCallback(() => {
     const params = new URLSearchParams({ sort, limit: "2000" });
     if (q.trim()) params.set("q", q.trim());
+    if (category) params.set("category", category);
+    if (reprOnly) params.set("repr_only", "true");
     fetch(`/api/etf/list?${params}`)
       .then((r) => r.json())
       .then((d) => {
         setRows(d.etfs ?? []);
         setAsOf(d.as_of ?? null);
+        if (d.categories?.length) setCats(d.categories);
         setPage(0);
       })
       .catch(() => setRows([]));
-  }, [q, sort]);
+  }, [q, sort, category, reprOnly]);
 
   useEffect(() => {
     const t = setTimeout(load, 250);
@@ -76,7 +85,8 @@ export default function EtfPage() {
         <div>
           <h1 className="text-xl font-bold">ETF 列表</h1>
           <p className="text-xs text-muted-foreground mt-1">
-            场内 ETF · 数据 {asOf ?? "—"} · 共 {rows?.length ?? 0} 只（Tushare fund_daily）
+            场内 ETF · 数据 {asOf ?? "—"} · 共 {rows?.length ?? 0} 只
+            {reprOnly ? "（去重代表）" : ""} · 分类+相关性聚类去重
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -104,6 +114,37 @@ export default function EtfPage() {
         </div>
       </div>
 
+      {/* 分类筛选 + 只看代表 */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={() => setCategory("")}
+          className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+            category === "" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent border-border"
+          }`}
+        >
+          全部
+        </button>
+        {["宽基", "行业", "主题", "风格策略", "QDII", "债券货币", "商品", "其他"].map((c) => {
+          const info = cats.find((x) => x.category === c);
+          if (!info) return null;
+          return (
+            <button
+              key={c}
+              onClick={() => setCategory(category === c ? "" : c)}
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                category === c ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent border-border"
+              }`}
+            >
+              {c} <span className="opacity-60">{info.n}</span>
+            </button>
+          );
+        })}
+        <label className="ml-2 flex items-center gap-1.5 text-xs cursor-pointer select-none">
+          <input type="checkbox" checked={reprOnly} onChange={(e) => setReprOnly(e.target.checked)} className="accent-[var(--primary)]" />
+          只看代表（去重后 {cats.reduce((s, c) => s + (c.reps || 0), 0)} 只）
+        </label>
+      </div>
+
       {rows == null ? (
         <div className="animate-pulse h-96 bg-muted rounded" />
       ) : rows.length === 0 ? (
@@ -115,10 +156,10 @@ export default function EtfPage() {
               <tr>
                 <th className="px-3 py-2 text-left font-medium">代码</th>
                 <th className="px-3 py-2 text-left font-medium">名称</th>
+                <th className="px-3 py-2 text-left font-medium">类别</th>
                 <th className="px-3 py-2 text-right font-medium">最新价</th>
                 <th className="px-3 py-2 text-right font-medium">涨跌幅</th>
                 <th className="px-3 py-2 text-right font-medium">成交额</th>
-                <th className="px-3 py-2 text-left font-medium">类型</th>
                 <th className="px-3 py-2 text-left font-medium">管理人</th>
               </tr>
             </thead>
@@ -130,7 +171,15 @@ export default function EtfPage() {
                   className="border-t border-border hover:bg-accent/40 cursor-pointer"
                 >
                   <td className="px-3 py-1.5 font-mono text-xs tabular-nums">{r.code}</td>
-                  <td className="px-3 py-1.5">{r.name}</td>
+                  <td className="px-3 py-1.5">
+                    {r.is_repr ? <span title="聚类代表(同类最活跃)" className="text-[var(--up)] mr-0.5">★</span> : null}
+                    {r.name}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    {r.category ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground">{r.category}</span>
+                    ) : "—"}
+                  </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
                     {r.close != null ? r.close.toFixed(3) : "—"}
                   </td>
@@ -142,9 +191,6 @@ export default function EtfPage() {
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
                     {fmtAmount(r.amount)}
-                  </td>
-                  <td className="px-3 py-1.5 text-xs text-muted-foreground">
-                    {r.invest_type || r.fund_type || "—"}
                   </td>
                   <td className="px-3 py-1.5 text-xs text-muted-foreground truncate max-w-[180px]">
                     {(r.management || "").replace(/基金管理.*$/, "").replace(/股份有限公司|有限公司/, "") || "—"}
