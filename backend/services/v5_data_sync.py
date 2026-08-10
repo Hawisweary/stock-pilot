@@ -383,5 +383,24 @@ def sync_v5_weekly(stock_ids: list[int] | None = None) -> dict:
         extra["lhb_watchlist"] = sync_lhb_watchlist(stock_ids)
     except Exception as e:
         extra["lhb_watchlist"] = {"error": str(e)}
+
+    # ETF 池清洗(一级分类 + 相关性聚类去重)。周频足够——ETF 列表变动少,daily 已滚动
+    # 累积行情;失败不阻塞。子进程隔离(脚本自带 pandas 聚类,可能较重)。
+    try:
+        import os
+        import subprocess
+        import sys
+
+        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "etf_build_pool.py")
+        r = subprocess.run(
+            [sys.executable, script], capture_output=True, text=True, timeout=600
+        )
+        if r.returncode == 0:
+            extra["etf_pool"] = (r.stdout or "").strip().split("\n")[-1][:120]
+        else:
+            extra["etf_pool"] = {"error": (r.stderr or "")[-120:]}
+    except Exception as e:
+        extra["etf_pool"] = {"error": str(e)}
+
     result["weekly_extra"] = extra
     return result
