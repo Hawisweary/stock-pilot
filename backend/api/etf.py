@@ -5,7 +5,8 @@ from fastapi import APIRouter, Query
 
 router = APIRouter(prefix="/api/etf", tags=["etf"])
 
-_SORT_COLS = {"amount": "q.amount", "pct_chg": "q.pct_chg", "close": "q.close"}
+_SORT_COLS = {"amount": "q.amount", "pct_chg": "q.pct_chg", "close": "q.close",
+              "score": "sc.composite_score"}
 
 
 @router.get("/list")
@@ -22,10 +23,12 @@ async def etf_list(
     conn = get_db_conn()
     latest_row = conn.execute("SELECT MAX(trade_date) FROM etf_daily_quotes").fetchone()
     latest = latest_row[0] if latest_row else None
+    score_row = conn.execute("SELECT MAX(trade_date) FROM etf_score").fetchone()
+    score_date = score_row[0] if score_row else None
     sort_col = _SORT_COLS.get(sort, "q.amount")
 
     where = ["e.is_active=1"]
-    params: list = [latest]
+    params: list = [latest, score_date]
     if q:
         where.append("(e.code LIKE ? OR e.name LIKE ?)")
         params += [f"%{q}%", f"%{q}%"]
@@ -39,11 +42,13 @@ async def etf_list(
     rows = conn.execute(
         f"""SELECT e.code, e.name, e.management, e.fund_type, e.invest_type, e.list_date,
                    e.category, e.is_repr, e.cluster_id,
-                   q.close, q.pct_chg, q.change, q.vol, q.amount, q.trade_date
+                   q.close, q.pct_chg, q.change, q.vol, q.amount, q.trade_date,
+                   sc.composite_score, sc.rank_in_category
             FROM etfs e
             LEFT JOIN etf_daily_quotes q ON q.ts_code=e.ts_code AND q.trade_date=?
+            LEFT JOIN etf_score sc ON sc.code=e.code AND sc.trade_date=?
             WHERE {' AND '.join(where)}
-            ORDER BY {sort_col} DESC
+            ORDER BY {sort_col} IS NULL, {sort_col} DESC
             LIMIT ?""",
         params,
     ).fetchall()

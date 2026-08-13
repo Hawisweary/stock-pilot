@@ -12,6 +12,8 @@ type EtfRow = {
   category?: string | null;
   is_repr?: number | null;
   cluster_id?: number | null;
+  composite_score?: number | null;
+  rank_in_category?: number | null;
   close?: number | null;
   pct_chg?: number | null;
   change?: number | null;
@@ -20,7 +22,7 @@ type EtfRow = {
   trade_date?: string | null;
 };
 
-type Sort = "amount" | "pct_chg" | "close";
+type Sort = "amount" | "pct_chg" | "close" | "score";
 
 function pctColor(v?: number | null) {
   if (v == null) return "var(--muted-foreground)";
@@ -74,6 +76,7 @@ export default function EtfPage() {
   const pageRows = rows ? rows.slice(page * PAGE, (page + 1) * PAGE) : [];
 
   const SORTS: { id: Sort; label: string }[] = [
+    { id: "score", label: "综合分" },
     { id: "amount", label: "成交额" },
     { id: "pct_chg", label: "涨跌幅" },
     { id: "close", label: "价格" },
@@ -157,6 +160,7 @@ export default function EtfPage() {
                 <th className="px-3 py-2 text-left font-medium">代码</th>
                 <th className="px-3 py-2 text-left font-medium">名称</th>
                 <th className="px-3 py-2 text-left font-medium">类别</th>
+                <th className="px-3 py-2 text-right font-medium">综合分</th>
                 <th className="px-3 py-2 text-right font-medium">最新价</th>
                 <th className="px-3 py-2 text-right font-medium">涨跌幅</th>
                 <th className="px-3 py-2 text-right font-medium">成交额</th>
@@ -179,6 +183,18 @@ export default function EtfPage() {
                     {r.category ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground">{r.category}</span>
                     ) : "—"}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {r.composite_score != null ? (
+                      <span className="font-semibold">
+                        {r.composite_score.toFixed(2)}
+                        {r.rank_in_category != null && (
+                          <span className="text-[10px] text-muted-foreground ml-1">#{r.rank_in_category}</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
                     {r.close != null ? r.close.toFixed(3) : "—"}

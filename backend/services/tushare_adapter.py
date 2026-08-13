@@ -1080,6 +1080,8 @@ def fetch_etf_list() -> list[dict[str, Any]]:
             "fund_type": r.get("fund_type"),
             "invest_type": r.get("invest_type"),
             "list_date": r.get("list_date"),
+            "m_fee": _f(r.get("m_fee")),
+            "c_fee": _f(r.get("c_fee")),
         })
     return rows
 

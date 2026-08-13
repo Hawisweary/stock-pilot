@@ -23,6 +23,12 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
         ts_code TEXT PRIMARY KEY, code TEXT, name TEXT, management TEXT,
         fund_type TEXT, invest_type TEXT, list_date TEXT,
         is_active INTEGER DEFAULT 1, updated_at TEXT DEFAULT (datetime('now')))""")
+    # 费率列(Step2 打分用),幂等补列
+    for col in ("m_fee", "c_fee"):
+        try:
+            conn.execute(f"ALTER TABLE etfs ADD COLUMN {col} REAL")
+        except sqlite3.OperationalError:
+            pass
     conn.execute("""CREATE TABLE IF NOT EXISTS etf_daily_quotes (
         ts_code TEXT, trade_date TEXT, open REAL, high REAL, low REAL, close REAL,
         pre_close REAL, change REAL, pct_chg REAL, vol REAL, amount REAL,
@@ -48,10 +54,17 @@ def sync_etf_list(conn: sqlite3.Connection) -> int:
     rows = fetch_etf_list()
     if not rows:
         return 0
+    # UPSERT:只更新基础字段,保留 category/cluster_id/is_repr/avg_amt_20d 等分析列。
+    # (原来 INSERT OR REPLACE 会删行重插→每次日更把池清洗结果清空,是隐蔽的严重 bug)
     conn.executemany(
-        """INSERT OR REPLACE INTO etfs
-           (ts_code, code, name, management, fund_type, invest_type, list_date, is_active, updated_at)
-           VALUES (:ts_code, :code, :name, :management, :fund_type, :invest_type, :list_date, 1, datetime('now'))""",
+        """INSERT INTO etfs
+           (ts_code, code, name, management, fund_type, invest_type, list_date, m_fee, c_fee, is_active, updated_at)
+           VALUES (:ts_code, :code, :name, :management, :fund_type, :invest_type, :list_date, :m_fee, :c_fee, 1, datetime('now'))
+           ON CONFLICT(ts_code) DO UPDATE SET
+             code=excluded.code, name=excluded.name, management=excluded.management,
+             fund_type=excluded.fund_type, invest_type=excluded.invest_type,
+             list_date=excluded.list_date, m_fee=excluded.m_fee, c_fee=excluded.c_fee,
+             is_active=1, updated_at=datetime('now')""",
         rows,
     )
     conn.commit()
