@@ -143,7 +143,7 @@ async def etf_detail(code: str):
         if not pf.get("holdings"):
             if category == "QDII":
                 pf["reason"] = "QDII 海外持仓，Tushare 未提供成分明细"
-            elif category in ("债券货币", "商品"):
+            elif category in ("债券", "货币", "商品"):
                 pf["reason"] = "非股票 ETF（债券/货币/商品），无股票持仓"
             else:
                 pf["reason"] = "该 ETF 暂无持仓披露（多为新成立或未到披露期）"

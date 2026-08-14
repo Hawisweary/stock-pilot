@@ -127,7 +127,7 @@ export default function EtfPage() {
         >
           全部
         </button>
-        {["宽基", "行业", "主题", "风格策略", "QDII", "债券货币", "商品", "其他"].map((c) => {
+        {["宽基", "行业", "主题", "风格策略", "QDII", "债券", "货币", "商品", "其他"].map((c) => {
           const info = cats.find((x) => x.category === c);
           if (!info) return null;
           return (

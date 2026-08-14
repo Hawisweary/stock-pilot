@@ -113,7 +113,7 @@ def main() -> None:
     print(f"行情天数={n_days}  相关阈值={args.corr}  最少观测={args.min_obs}")
     print(f"{'类别':<8}{'总数':>6}{'入选聚类':>8}{'代表数':>8}  (压缩)")
     tot_c = tot_r = 0
-    for cat in ["宽基", "行业", "主题", "风格策略", "QDII", "债券货币", "商品", "其他"]:
+    for cat in ["宽基", "行业", "主题", "风格策略", "QDII", "债券", "货币", "商品", "其他"]:
         if cat not in summary:
             continue
         total, elig_n, reps_n = summary[cat]
