@@ -46,7 +46,9 @@ async def etf_list(
                    sc.composite_score, sc.rank_in_category
             FROM etfs e
             LEFT JOIN etf_daily_quotes q ON q.ts_code=e.ts_code AND q.trade_date=?
-            LEFT JOIN etf_score sc ON sc.code=e.code AND sc.trade_date=?
+            -- 分数挂在同簇代表上:代表取自己的分,撞款的非代表继承本簇代表的分
+            LEFT JOIN etfs rep ON rep.cluster_id=e.cluster_id AND rep.is_repr=1
+            LEFT JOIN etf_score sc ON sc.code=rep.code AND sc.trade_date=?
             WHERE {' AND '.join(where)}
             ORDER BY {sort_col} IS NULL, {sort_col} DESC
             LIMIT ?""",
@@ -82,15 +84,16 @@ async def etf_detail(code: str):
 
     conn = get_db_conn()
     e = conn.execute(
-        "SELECT ts_code, code, name, management, fund_type, invest_type, list_date "
+        "SELECT ts_code, code, name, management, fund_type, invest_type, list_date, category "
         "FROM etfs WHERE code=?",
         (code,),
     ).fetchone()
     if not e:
         return {"error": "未找到该 ETF"}
     ts_code = e["ts_code"]
+    category = e["category"]
 
-    result: dict = {"code": code, "ts_code": ts_code, "name": e["name"]}
+    result: dict = {"code": code, "ts_code": ts_code, "name": e["name"], "category": category}
 
     # 行情（本地已同步，取近 120 交易日）
     q = conn.execute(
@@ -136,6 +139,14 @@ async def etf_detail(code: str):
                 namemap[c2] = nm
         for h in pf.get("holdings", []):
             h["name"] = namemap.get((h.get("symbol") or "").split(".")[0])
+        # 空持仓按类别给原因(Tushare fund_portfolio 只覆盖 A 股股票持仓)
+        if not pf.get("holdings"):
+            if category == "QDII":
+                pf["reason"] = "QDII 海外持仓，Tushare 未提供成分明细"
+            elif category in ("债券货币", "商品"):
+                pf["reason"] = "非股票 ETF（债券/货币/商品），无股票持仓"
+            else:
+                pf["reason"] = "该 ETF 暂无持仓披露（多为新成立或未到披露期）"
         result["portfolio"] = pf
     except Exception as ex:  # noqa: BLE001
         result["portfolio"] = {"error": str(ex)[:80]}

@@ -15,7 +15,7 @@ type Detail = {
   nav?: { nav_date: string; unit_nav: number | null }[] | { error?: string };
   nav_latest?: { nav_date: string; unit_nav: number | null };
   premium_pct?: number | null;
-  portfolio?: { end_date?: string | null; holdings?: Holding[]; error?: string };
+  portfolio?: { end_date?: string | null; holdings?: Holding[]; error?: string; reason?: string };
   error?: string;
 };
 
@@ -136,7 +136,7 @@ export default function EtfDetailPage() {
               </div>
             ))}
           </div>
-        ) : <div className="text-xs text-muted-foreground py-6 text-center">持仓数据暂不可用{d.portfolio?.error ? `（${d.portfolio.error}）` : ""}</div>}
+        ) : <div className="text-xs text-muted-foreground py-6 text-center">{d.portfolio?.reason || d.portfolio?.error || "持仓数据暂不可用"}</div>}
       </div>
     </div>
   );

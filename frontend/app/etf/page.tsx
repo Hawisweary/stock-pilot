@@ -185,7 +185,9 @@ export default function EtfPage() {
                     ) : "—"}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
-                    {r.composite_score != null ? (
+                    {r.composite_score == null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : r.is_repr ? (
                       <span className="font-semibold">
                         {r.composite_score.toFixed(2)}
                         {r.rank_in_category != null && (
@@ -193,7 +195,7 @@ export default function EtfPage() {
                         )}
                       </span>
                     ) : (
-                      <span className="text-muted-foreground">—</span>
+                      <span className="text-muted-foreground" title="继承自同簇代表ETF的分数">≈{r.composite_score.toFixed(2)}</span>
                     )}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
