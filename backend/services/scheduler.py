@@ -530,7 +530,7 @@ def run_daily_tasks():
             ("tushare_sync_moneyflow_detail.py", "L2资金流", ["--days", "5"], 1200),
             ("compute_alpha_factors_v1.py", "资金共振", ["--days", "5", "--skip-surprise"], 900),
             ("akshare_sync_market_breadth.py", "市场广度", [], 300),
-            ("tushare_sync_etf.py", "ETF", ["--quotes-days", "3"], 600),
+            ("tushare_sync_etf.py", "ETF", ["--quotes-days", "3", "--flow-days", "3"], 600),
         ]:
             try:
                 _dlog(_fh, f"▶ ②{label}")

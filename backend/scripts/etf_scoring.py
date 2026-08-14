@@ -49,6 +49,12 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
         created_at TEXT DEFAULT (datetime('now')),
         PRIMARY KEY (code, trade_date))""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_etf_score_date_cat ON etf_score(trade_date, category)")
+    # 资金流/规模原始列(管线上线后补,幂等)
+    for col in ("fund_size", "net_inflow_20d"):
+        try:
+            conn.execute(f"ALTER TABLE etf_score ADD COLUMN {col} REAL")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
 
 
@@ -88,6 +94,15 @@ def main() -> None:
     if reps.empty:
         print("代表 ETF 为空(先跑 etf_build_pool)"); return
 
+    # 资金流 + 规模(etf_flow 最新一期);无表时为空 → score_flow/score_size 自动留桩
+    try:
+        # 按 code 取各自最新一期(fund_share 披露滞后不一,不能用全局 MAX 过滤)
+        flow = pd.read_sql_query(
+            "SELECT f.code, f.fund_size, f.flow_20d, f.flow_intensity FROM etf_flow f "
+            "WHERE f.trade_date=(SELECT MAX(trade_date) FROM etf_flow f2 WHERE f2.code=f.code)", conn)
+    except Exception:
+        flow = pd.DataFrame(columns=["code", "fund_size", "flow_20d", "flow_intensity"])
+
     # 2) 行情 → 动量指标
     q = pd.read_sql_query("SELECT ts_code, trade_date, close FROM etf_daily_quotes", conn)
     close = q.pivot(index="trade_date", columns="ts_code", values="close").sort_index()
@@ -124,12 +139,11 @@ def main() -> None:
             "return_1m": mom(ts, 21), "return_3m": mom(ts, 63), "return_6m": mom(ts, 120),
             "sharpe": sh, "annual_vol": vol,
         })
-    df = pd.DataFrame(recs)
+    df = pd.DataFrame(recs).merge(flow, on="code", how="left")
 
     # 3) 同类内标准化 → 分数
-    df["score_liquidity"] = np.nan
-    df["score_fee"] = np.nan
-    df["score_momentum"] = np.nan
+    for col in ("score_liquidity", "score_fee", "score_momentum", "score_flow", "score_size"):
+        df[col] = np.nan
     for cat, g in df.groupby("category"):
         idx = g.index
         # 流动性:log(20日均额),越大越好
@@ -140,9 +154,13 @@ def main() -> None:
         zr = pd.concat([_winsor_z(g["return_1m"]), _winsor_z(g["return_3m"]),
                         _winsor_z(g["return_6m"]), _winsor_z(g["sharpe"])], axis=1).mean(axis=1)
         df.loc[idx, "score_momentum"] = _winsor_z(zr).values
+        # 资金流:强度(20日净流入/规模,跨大小可比),越大越好
+        df.loc[idx, "score_flow"] = _winsor_z(g["flow_intensity"]).values
+        # 规模:log(规模亿元),越大越好(清盘风险低/机构认可)
+        df.loc[idx, "score_size"] = _winsor_z(np.log(g["fund_size"].clip(lower=0) + 1)).values
 
-    # 留桩分数列(当前 None,管线上线后填充即自动进入合成)
-    for c in ["score_size", "score_tracking", "score_premium", "score_valuation", "score_flow", "score_boom", "score_purity"]:
+    # 仍留桩(需新管线,当前 None,上线后自动进入合成)
+    for c in ["score_tracking", "score_premium", "score_valuation", "score_boom", "score_purity"]:
         df[c] = np.nan
 
     # 4) 类别权重加权(仅在有值的分数上重归一化)→ 合成 + 同类排名
@@ -165,14 +183,16 @@ def main() -> None:
     for _, r in df.iterrows():
         conn.execute(
             """INSERT OR REPLACE INTO etf_score
-               (code, trade_date, category, is_repr, avg_amt_20d, fee_rate,
+               (code, trade_date, category, is_repr, avg_amt_20d, fee_rate, fund_size, net_inflow_20d,
                 return_1m, return_3m, return_6m, sharpe, annual_vol,
-                score_liquidity, score_fee, score_momentum,
+                score_liquidity, score_fee, score_momentum, score_flow, score_size,
                 composite_score, rank_in_category)
-               VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (r["code"], str(trade_date), r["category"], _n(r["avg_amt_20d"]), _n(r["fee_rate"]),
+             _n(r.get("fund_size")), _n(r.get("flow_20d")),
              _n(r["return_1m"]), _n(r["return_3m"]), _n(r["return_6m"]), _n(r["sharpe"]), _n(r["annual_vol"]),
              _n(r["score_liquidity"]), _n(r["score_fee"]), _n(r["score_momentum"]),
+             _n(r.get("score_flow")), _n(r.get("score_size")),
              _n(r["composite_score"]), int(r["rank_in_category"]) if not pd.isna(r["rank_in_category"]) else None),
         )
         n += 1

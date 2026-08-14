@@ -402,7 +402,19 @@ def sync_v5_weekly(stock_ids: list[int] | None = None) -> dict:
     except Exception as e:
         extra["etf_pool"] = {"error": str(e)}
 
-    # ETF 分层打分(第二步)。必须在池清洗之后——只对 is_repr=1 的代表打分。失败不阻塞。
+    # ETF 资金流计算(地基,行业/主题打分权重最高)。在打分之前跑,让 score_flow 拿到最新值。
+    try:
+        import os
+        import subprocess
+        import sys
+
+        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "etf_flow_calc.py")
+        r = subprocess.run([sys.executable, script], capture_output=True, text=True, timeout=600)
+        extra["etf_flow"] = (r.stdout or "").strip().split("\n")[0][:120] if r.returncode == 0 else {"error": (r.stderr or "")[-120:]}
+    except Exception as e:
+        extra["etf_flow"] = {"error": str(e)}
+
+    # ETF 分层打分(第二步)。必须在池清洗+资金流之后——只对 is_repr=1 的代表打分。失败不阻塞。
     try:
         import os
         import subprocess

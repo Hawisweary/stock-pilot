@@ -1168,3 +1168,25 @@ def fetch_etf_portfolio_latest(ts_code: str, top: int = 10) -> dict[str, Any]:
         "mkv": _f(r.get("mkv")),
     } for _, r in sub.iterrows()]
     return {"end_date": str(latest), "holdings": holdings}
+
+
+def fetch_etf_shares(trade_date: str) -> list[dict[str, Any]]:
+    """某交易日全场内基金份额(fund_share by trade_date)。fd_share 单位=万份。"""
+    pro = _pro()
+    _throttle()
+    df = pro.fund_share(trade_date=trade_date)
+    if df is None or df.empty:
+        return []
+    return [{"ts_code": str(r["ts_code"]), "fd_share": _f(r.get("fd_share"))}
+            for _, r in df.iterrows()]
+
+
+def fetch_etf_nav_by_date(nav_date: str) -> list[dict[str, Any]]:
+    """某净值日全基金单位净值(fund_nav by nav_date)。"""
+    pro = _pro()
+    _throttle()
+    df = pro.fund_nav(nav_date=nav_date)
+    if df is None or df.empty:
+        return []
+    return [{"ts_code": str(r["ts_code"]), "unit_nav": _f(r.get("unit_nav"))}
+            for _, r in df.iterrows()]

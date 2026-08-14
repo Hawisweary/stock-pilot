@@ -34,6 +34,12 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
         pre_close REAL, change REAL, pct_chg REAL, vol REAL, amount REAL,
         PRIMARY KEY (ts_code, trade_date))""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_etf_quotes_date ON etf_daily_quotes(trade_date)")
+    # 份额/净值列(资金流管道用):fd_share=份额(万份), unit_nav=单位净值
+    for col in ("fd_share", "unit_nav"):
+        try:
+            conn.execute(f"ALTER TABLE etf_daily_quotes ADD COLUMN {col} REAL")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
 
 
@@ -102,10 +108,42 @@ def sync_etf_quotes(conn: sqlite3.Connection, days: int) -> int:
     return total
 
 
+def sync_etf_shares_nav(conn: sqlite3.Connection, days: int) -> int:
+    """回补近 N 交易日的份额(fund_share)+ 净值(fund_nav),写入 etf_daily_quotes.fd_share/unit_nav。
+    两个接口都按日批量拉全市场,每交易日仅 2 次调用。"""
+    from services.tushare_adapter import fetch_etf_nav_by_date, fetch_etf_shares
+
+    etf_codes = {r[0] for r in conn.execute("SELECT ts_code FROM etfs WHERE is_active=1")}
+    if not etf_codes:
+        return 0
+    total = 0
+    for i, d in enumerate(_trading_days(days), 1):
+        trade_date_fmt = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+        shares = {r["ts_code"]: r["fd_share"] for r in fetch_etf_shares(d) if r["ts_code"] in etf_codes}
+        navs = {r["ts_code"]: r["unit_nav"] for r in fetch_etf_nav_by_date(d) if r["ts_code"] in etf_codes}
+        # 行情同步已建行;这里补 fd_share/unit_nav。行情缺失的日子(非交易日)自然没有行,跳过。
+        rows = [(shares.get(ts), navs.get(ts), ts, trade_date_fmt)
+                for ts in (shares.keys() | navs.keys())]
+        if rows:
+            conn.executemany(
+                "UPDATE etf_daily_quotes SET fd_share=?, unit_nav=? WHERE ts_code=? AND trade_date=?",
+                rows,
+            )
+            conn.commit()
+            total += len(rows)
+        if i % 3 == 0:
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.OperationalError:
+                pass
+    return total
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--list-only", action="store_true", help="只刷 ETF 列表")
     parser.add_argument("--quotes-days", type=int, default=5, help="回补最近 N 个交易日日线")
+    parser.add_argument("--flow-days", type=int, default=0, help="回补最近 N 交易日份额+净值(资金流用,0=不补)")
     args = parser.parse_args()
 
     conn = sqlite3.connect(config.DB_PATH, timeout=60)
@@ -116,6 +154,9 @@ def main() -> None:
         if not args.list_only:
             n_q = sync_etf_quotes(conn, args.quotes_days)
             print(f"[ETF行情] 近{args.quotes_days}交易日共写入 {n_q} 条")
+        if args.flow_days > 0:
+            n_f = sync_etf_shares_nav(conn, args.flow_days)
+            print(f"[ETF份额净值] 近{args.flow_days}交易日共更新 {n_f} 条")
     finally:
         try:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
