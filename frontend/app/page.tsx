@@ -165,14 +165,19 @@ export default function DashboardPage() {
     pollAbortRef.current = ac;
 
     setRefreshing(true);
-    setRefreshMsg("正在同步 V5 数据与评分...");
+    setRefreshMsg("正在触发 V5 同步...");
     try {
-      await fetch("/api/v5/sync", {
+      const syncResp = await fetch("/api/v5/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: "daily" }),
-      });
+      }).then((r) => r.json()).catch(() => null);
       clearCache();
+      if (syncResp?.status === "already_running") {
+        toast.info("V5 同步已在进行中，无需重复触发");
+      } else {
+        toast.success("V5 同步已在后台启动，评分稍后自动更新，可继续操作");
+      }
 
       setRefreshMsg("正在后台增量抓取股票数据...");
       const data = await api.fetchAll("incremental");
@@ -193,7 +198,7 @@ export default function DashboardPage() {
         2000,
         ac.signal
       );
-      setRefreshMsg("数据更新完成（如需最新 V5 评分请到数据页重算）");
+      setRefreshMsg("增量抓取完成（V5 同步/评分在后台进行，稍后自动生效）");
       await loadData();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
