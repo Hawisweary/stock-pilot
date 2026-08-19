@@ -414,6 +414,18 @@ def sync_v5_weekly(stock_ids: list[int] | None = None) -> dict:
     except Exception as e:
         extra["etf_flow"] = {"error": str(e)}
 
+    # ETF 持仓加权估值(填宽基/主题估值桩)。持仓季度缓存,拉一次约2-3分钟;失败不阻塞。
+    try:
+        import os
+        import subprocess
+        import sys
+
+        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "etf_valuation_calc.py")
+        r = subprocess.run([sys.executable, script], capture_output=True, text=True, timeout=900)
+        extra["etf_valuation"] = (r.stdout or "").strip().split("\n")[0][:120] if r.returncode == 0 else {"error": (r.stderr or "")[-120:]}
+    except Exception as e:
+        extra["etf_valuation"] = {"error": str(e)}
+
     # ETF 分层打分(第二步)。必须在池清洗+资金流之后——只对 is_repr=1 的代表打分。失败不阻塞。
     try:
         import os

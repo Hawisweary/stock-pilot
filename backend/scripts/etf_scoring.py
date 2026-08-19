@@ -57,7 +57,7 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
         PRIMARY KEY (code, trade_date))""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_etf_score_date_cat ON etf_score(trade_date, category)")
     # 增量列(资金流/规模/回撤/折溢价 + 非股票类分数),幂等
-    for col in ("fund_size", "net_inflow_20d", "max_drawdown", "premium",
+    for col in ("fund_size", "net_inflow_20d", "max_drawdown", "premium", "pe_ttm",
                 "score_sharpe", "score_drawdown", "score_volatility"):
         try:
             conn.execute(f"ALTER TABLE etf_score ADD COLUMN {col} REAL")
@@ -111,6 +111,12 @@ def main() -> None:
     except Exception:
         flow = pd.DataFrame(columns=["code", "fund_size", "flow_20d", "flow_intensity"])
 
+    # 持仓加权估值(股票类;横截面加权PE,越低越便宜)
+    try:
+        val = pd.read_sql_query("SELECT code, weighted_pe FROM etf_valuation", conn)
+    except Exception:
+        val = pd.DataFrame(columns=["code", "weighted_pe"])
+
     # 折溢价:最新 close/unit_nav-1(资金流管道已把 unit_nav 落到 etf_daily_quotes)
     prem = pd.read_sql_query(
         """SELECT ts_code, close, unit_nav FROM etf_daily_quotes q
@@ -158,11 +164,11 @@ def main() -> None:
             "sharpe": sh, "annual_vol": vol, "max_drawdown": dd,
             "premium": prem_map.get(ts),
         })
-    df = pd.DataFrame(recs).merge(flow, on="code", how="left")
+    df = pd.DataFrame(recs).merge(flow, on="code", how="left").merge(val, on="code", how="left")
 
     # 3) 同类内标准化 → 分数
     for col in ("score_liquidity", "score_fee", "score_momentum", "score_flow", "score_size",
-                "score_sharpe", "score_drawdown", "score_volatility", "score_premium"):
+                "score_sharpe", "score_drawdown", "score_volatility", "score_premium", "score_valuation"):
         df[col] = np.nan
     for cat, g in df.groupby("category"):
         idx = g.index
@@ -178,9 +184,10 @@ def main() -> None:
         df.loc[idx, "score_drawdown"] = (-_winsor_z(g["max_drawdown"])).values                        # 回撤幅度,越小越好
         df.loc[idx, "score_volatility"] = (-_winsor_z(g["annual_vol"])).values                        # 波动,越低越好(商品)
         df.loc[idx, "score_premium"] = (-_winsor_z(g["premium"].abs())).values                        # 折溢价绝对值,越接近0越好
+        df.loc[idx, "score_valuation"] = (-_winsor_z(g["weighted_pe"])).values                        # 持仓加权PE,越低越便宜越好
 
-    # 仍留桩(需指数/成分股/因子暴露管线,当前 None)
-    for c in ["score_tracking", "score_valuation", "score_boom", "score_purity"]:
+    # 仍留桩(需指数跟踪/成分股财报/因子暴露管线,当前 None)
+    for c in ["score_tracking", "score_boom", "score_purity"]:
         df[c] = np.nan
 
     # 4) 类别权重加权(仅在有值的分数上重归一化)→ 合成 + 同类排名
@@ -204,18 +211,19 @@ def main() -> None:
         conn.execute(
             """INSERT OR REPLACE INTO etf_score
                (code, trade_date, category, is_repr, avg_amt_20d, fee_rate, fund_size, net_inflow_20d,
-                return_1m, return_3m, return_6m, sharpe, annual_vol, max_drawdown, premium,
+                return_1m, return_3m, return_6m, sharpe, annual_vol, max_drawdown, premium, pe_ttm,
                 score_liquidity, score_fee, score_momentum, score_flow, score_size,
-                score_sharpe, score_drawdown, score_volatility, score_premium,
+                score_sharpe, score_drawdown, score_volatility, score_premium, score_valuation,
                 composite_score, rank_in_category)
-               VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (r["code"], str(trade_date), r["category"], _n(r["avg_amt_20d"]), _n(r["fee_rate"]),
              _n(r.get("fund_size")), _n(r.get("flow_20d")),
              _n(r["return_1m"]), _n(r["return_3m"]), _n(r["return_6m"]), _n(r["sharpe"]),
-             _n(r["annual_vol"]), _n(r.get("max_drawdown")), _n(r.get("premium")),
+             _n(r["annual_vol"]), _n(r.get("max_drawdown")), _n(r.get("premium")), _n(r.get("weighted_pe")),
              _n(r["score_liquidity"]), _n(r["score_fee"]), _n(r["score_momentum"]),
              _n(r.get("score_flow")), _n(r.get("score_size")),
-             _n(r.get("score_sharpe")), _n(r.get("score_drawdown")), _n(r.get("score_volatility")), _n(r.get("score_premium")),
+             _n(r.get("score_sharpe")), _n(r.get("score_drawdown")), _n(r.get("score_volatility")),
+             _n(r.get("score_premium")), _n(r.get("score_valuation")),
              _n(r["composite_score"]), int(r["rank_in_category"]) if not pd.isna(r["rank_in_category"]) else None),
         )
         n += 1
