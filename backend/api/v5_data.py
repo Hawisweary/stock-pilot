@@ -38,6 +38,9 @@ class V5SyncBody(BaseModel):
     news_limit: int = Field(15, ge=5, le=50)
 
 
+_v5_sync_running = False  # 并发守卫:V5 重同步一次只跑一个,防连点堆叠冻结全站
+
+
 @router.post("/sync")
 async def sync_v5(body: V5SyncBody | None = None):
     """一键同步 V5 数据源（宏观/资金流/质量/EPS/事件/风险/政策/情绪）。
@@ -53,31 +56,46 @@ async def sync_v5(body: V5SyncBody | None = None):
             status_code=400,
             detail=f"mode 需为 {list(V5_SYNC_MODE_PRESETS.keys())} 之一",
         )
-    return sync_v5_data_sources(
-        stock_ids=body.stock_ids,
-        mode=body.mode,
-        skip_macro=body.skip_macro,
-        skip_fund_flow=body.skip_fund_flow,
-        skip_sector=body.skip_sector,
-        skip_metrics=body.skip_metrics,
-        skip_industry_l2=body.skip_industry_l2,
-        skip_eps_revision=body.skip_eps_revision,
-        skip_announcements=body.skip_announcements,
-        skip_news_fetch=body.skip_news_fetch,
-        skip_events=body.skip_events,
-        reclassify_events=body.reclassify_events,
-        use_llm_events=body.use_llm_events,
-        llm_only_missing_news=body.llm_only_missing_news,
-        llm_event_limit_per_stock=body.llm_event_limit_per_stock,
-        skip_risk=body.skip_risk,
-        skip_policy=body.skip_policy,
-        skip_mood=body.skip_mood,
-        skip_v5_scores=body.skip_v5_scores,
-        skip_tushare_events=body.skip_tushare_events,
-        tushare_event_days=body.tushare_event_days,
-        announcement_limit=body.announcement_limit,
-        news_limit=body.news_limit,
-    )
+    # sync_v5_data_sources 是同步重函数(全量抓取+LLM,可跑数分钟)。绝不能在 async 处理器里
+    # 裸调——会冻结整个事件循环致全站超时(曾发生)。丢到线程池 + 并发守卫。
+    global _v5_sync_running
+    if _v5_sync_running:
+        return {"status": "already_running", "message": "V5 同步进行中,请稍候再试"}
+
+    def _run_sync():
+        return sync_v5_data_sources(
+            stock_ids=body.stock_ids,
+            mode=body.mode,
+            skip_macro=body.skip_macro,
+            skip_fund_flow=body.skip_fund_flow,
+            skip_sector=body.skip_sector,
+            skip_metrics=body.skip_metrics,
+            skip_industry_l2=body.skip_industry_l2,
+            skip_eps_revision=body.skip_eps_revision,
+            skip_announcements=body.skip_announcements,
+            skip_news_fetch=body.skip_news_fetch,
+            skip_events=body.skip_events,
+            reclassify_events=body.reclassify_events,
+            use_llm_events=body.use_llm_events,
+            llm_only_missing_news=body.llm_only_missing_news,
+            llm_event_limit_per_stock=body.llm_event_limit_per_stock,
+            skip_risk=body.skip_risk,
+            skip_policy=body.skip_policy,
+            skip_mood=body.skip_mood,
+            skip_v5_scores=body.skip_v5_scores,
+            skip_tushare_events=body.skip_tushare_events,
+            tushare_event_days=body.tushare_event_days,
+            announcement_limit=body.announcement_limit,
+            news_limit=body.news_limit,
+        )
+
+    import asyncio
+
+    _v5_sync_running = True
+    try:
+        return await asyncio.get_event_loop().run_in_executor(None, _run_sync)
+    finally:
+        _v5_sync_running = False
 
 
 @router.get("/metrics/{stock_id}")
