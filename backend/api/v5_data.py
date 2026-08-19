@@ -89,13 +89,19 @@ async def sync_v5(body: V5SyncBody | None = None):
             news_limit=body.news_limit,
         )
 
-    import asyncio
+    # 发射即返回:后台线程跑,前端不用干等几分钟(与 fetch_all 一致)。守卫防并发。
+    import threading
+
+    def _bg():
+        global _v5_sync_running
+        try:
+            _run_sync()
+        finally:
+            _v5_sync_running = False
 
     _v5_sync_running = True
-    try:
-        return await asyncio.get_event_loop().run_in_executor(None, _run_sync)
-    finally:
-        _v5_sync_running = False
+    threading.Thread(target=_bg, daemon=True).start()
+    return {"status": "started", "message": "V5 同步已在后台启动,稍后刷新页面查看"}
 
 
 @router.get("/metrics/{stock_id}")
