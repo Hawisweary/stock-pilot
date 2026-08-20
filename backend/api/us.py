@@ -100,4 +100,10 @@ async def us_detail(ticker: str):
                 result["name"] = m.get("name")
     except Exception as ex:  # noqa: BLE001
         result["fundamentals"] = {"error": str(ex)[:80]}
+    # 富字段(yfinance:行业/分析师目标价/52周/质量成长,单只按需)
+    try:
+        from services.us_market_adapter import fetch_us_profile
+        result["profile"] = fetch_us_profile(ticker) or {}
+    except Exception as ex:  # noqa: BLE001
+        result["profile"] = {"error": str(ex)[:80]}
     return result

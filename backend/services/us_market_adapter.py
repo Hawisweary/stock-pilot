@@ -101,7 +101,7 @@ def fetch_us_quotes_bulk(tickers: list[str], period: str = "5d") -> list[dict[st
             continue
         for dt, r in sub.iterrows():
             close = _f(r.get("Close"))
-            if close is None:
+            if close is None or close != close:  # 拦 None 与 NaN(yfinance 偶返NaN行)
                 continue
             rows.append({
                 "ticker": tk,
@@ -161,3 +161,41 @@ def fetch_us_names() -> dict[str, str]:
                   headers={"User-Agent": "StockPilot Research admin@stockpilot.app"})
     d = json.load(urlopen(req, timeout=30))
     return {it["ticker"]: it["title"] for it in d.values() if it.get("ticker")}
+
+
+def fetch_us_profile(ticker: str) -> dict[str, Any] | None:
+    """yfinance .info 富字段:行业/分析师目标价评级/52周/质量成长(免费,单只按需)。"""
+    import warnings
+
+    import yfinance as yf
+
+    warnings.filterwarnings("ignore")
+    try:
+        info = yf.Ticker(ticker).info
+    except Exception:
+        return None
+    if not info:
+        return None
+    return {
+        "sector": info.get("sector"),
+        "industry": info.get("industry"),
+        "market_cap": _f(info.get("marketCap")),  # Tiingo 基本面缺时回退用
+        "trailing_pe": _f(info.get("trailingPE")),
+        "pb": _f(info.get("priceToBook")),
+        "beta": _f(info.get("beta")),
+        "forward_pe": _f(info.get("forwardPE")),
+        "div_yield": _f(info.get("dividendYield")),
+        "wk52_high": _f(info.get("fiftyTwoWeekHigh")),
+        "wk52_low": _f(info.get("fiftyTwoWeekLow")),
+        "target_mean": _f(info.get("targetMeanPrice")),
+        "target_high": _f(info.get("targetHighPrice")),
+        "target_low": _f(info.get("targetLowPrice")),
+        "recommendation": info.get("recommendationKey"),
+        "num_analysts": info.get("numberOfAnalystOpinions"),
+        "profit_margin": _f(info.get("profitMargins")),
+        "roe": _f(info.get("returnOnEquity")),
+        "rev_growth": _f(info.get("revenueGrowth")),
+        "eps_growth": _f(info.get("earningsGrowth")),
+        "eps": _f(info.get("trailingEps")),
+        "employees": info.get("fullTimeEmployees"),
+    }

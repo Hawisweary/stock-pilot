@@ -9,9 +9,27 @@ type Detail = {
   ticker: string; name?: string | null; exchange?: string;
   quotes: Quote[];
   fundamentals?: { market_cap?: number | null; pe?: number | null; pb?: number | null; peg?: number | null; enterprise_val?: number | null; error?: string };
+  profile?: {
+    sector?: string | null; industry?: string | null; beta?: number | null; forward_pe?: number | null;
+    market_cap?: number | null; trailing_pe?: number | null; pb?: number | null;
+    div_yield?: number | null; wk52_high?: number | null; wk52_low?: number | null;
+    target_mean?: number | null; target_high?: number | null; target_low?: number | null;
+    recommendation?: string | null; num_analysts?: number | null;
+    profit_margin?: number | null; roe?: number | null; rev_growth?: number | null; eps_growth?: number | null;
+    eps?: number | null; employees?: number | null; error?: string;
+  };
   description?: string | null;
   error?: string;
 };
+
+const RATING_CN: Record<string, { label: string; color: string }> = {
+  strong_buy: { label: "强烈买入", color: "var(--up)" },
+  buy: { label: "买入", color: "var(--up)" },
+  hold: { label: "持有", color: "var(--muted-foreground)" },
+  underperform: { label: "减持", color: "var(--down)" },
+  sell: { label: "卖出", color: "var(--down)" },
+};
+const pct = (v?: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
 
 const fmtCap = (v?: number | null) => {
   if (v == null) return "—";
@@ -40,16 +58,24 @@ export default function UsDetailPage() {
   if (loading) return <div className="animate-pulse h-96 bg-muted rounded-lg" />;
   if (!d || d.error) return <div className="text-sm text-muted-foreground">未找到该美股（{d?.error ?? ticker}）</div>;
 
-  const chart = d.quotes.map((q) => ({ date: q.trade_date.slice(5), close: q.close }));
-  const last = d.quotes[d.quotes.length - 1];
-  const prev = d.quotes[d.quotes.length - 2];
+  const valid = d.quotes.filter((q) => q.close != null);
+  const chart = valid.map((q) => ({ date: q.trade_date.slice(5), close: q.close }));
+  const last = valid[valid.length - 1];
+  const prev = valid[valid.length - 2];
   const chg = last?.close != null && prev?.close ? (last.close / prev.close - 1) * 100 : null;
   const f = d.fundamentals && !d.fundamentals.error ? d.fundamentals : null;
+  const p = d.profile && !d.profile.error ? d.profile : null;
 
   const Stat = ({ label, value }: { label: string; value: React.ReactNode }) => (
     <div className="rounded-xl border bg-card p-3">
       <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="text-lg font-bold tabular-nums">{value}</div>
+    </div>
+  );
+  const Kv = ({ k, v }: { k: string; v: React.ReactNode }) => (
+    <div className="flex justify-between gap-2 border-b border-border/40 py-0.5">
+      <span className="text-muted-foreground">{k}</span>
+      <span className="font-medium tabular-nums text-right truncate">{v}</span>
     </div>
   );
 
@@ -62,7 +88,10 @@ export default function UsDetailPage() {
       <div className="flex items-end justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-xl font-bold">{d.name || d.ticker}</h1>
-          <div className="text-xs font-mono text-muted-foreground">{d.ticker} · {d.exchange}</div>
+          <div className="text-xs text-muted-foreground">
+            <span className="font-mono">{d.ticker} · {d.exchange}</span>
+            {p?.sector && <span className="ml-2">· {p.sector}</span>}
+          </div>
         </div>
         <div className="text-right">
           <div className="text-2xl font-bold tabular-nums">{last?.close != null ? `$${last.close.toFixed(2)}` : "—"}</div>
@@ -74,11 +103,63 @@ export default function UsDetailPage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label="市值" value={fmtCap(f?.market_cap)} />
-        <Stat label="PE" value={fmtNum(f?.pe)} />
-        <Stat label="PB" value={fmtNum(f?.pb)} />
+        <Stat label="市值" value={fmtCap(f?.market_cap ?? p?.market_cap)} />
+        <Stat label="PE" value={fmtNum(f?.pe ?? p?.trailing_pe)} />
+        <Stat label="PB" value={fmtNum(f?.pb ?? p?.pb)} />
         <Stat label="PEG" value={fmtNum(f?.peg)} />
       </div>
+
+      {p && (p.sector || p.target_mean != null) && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* 分析师 */}
+          <div className="rounded-xl border bg-card p-4">
+            <div className="flex items-baseline justify-between mb-2">
+              <div className="text-sm font-semibold">分析师</div>
+              {p.recommendation && (
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded text-white"
+                  style={{ backgroundColor: RATING_CN[p.recommendation]?.color ?? "var(--muted-foreground)" }}>
+                  {RATING_CN[p.recommendation]?.label ?? p.recommendation}
+                </span>
+              )}
+            </div>
+            {p.target_mean != null ? (
+              <div className="space-y-1.5">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold tabular-nums">${p.target_mean.toFixed(0)}</span>
+                  {last?.close != null && (
+                    <span className="text-sm font-medium tabular-nums"
+                      style={{ color: p.target_mean > last.close ? "var(--up)" : "var(--down)" }}>
+                      {p.target_mean > last.close ? "+" : ""}{((p.target_mean / last.close - 1) * 100).toFixed(1)}% 空间
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  目标区间 ${fmtNum(p.target_low, 0)}–${fmtNum(p.target_high, 0)} · {p.num_analysts ?? "?"} 位分析师
+                </div>
+              </div>
+            ) : <div className="text-xs text-muted-foreground py-2">无分析师覆盖</div>}
+          </div>
+
+          {/* 质量 / 成长 */}
+          <div className="lg:col-span-2 rounded-xl border bg-card p-4">
+            <div className="text-sm font-semibold mb-2">质量 · 成长 · 风险</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-xs">
+              <Kv k="行业" v={p.industry || p.sector || "—"} />
+              <Kv k="ROE" v={pct(p.roe)} />
+              <Kv k="利润率" v={pct(p.profit_margin)} />
+              <Kv k="营收增长" v={pct(p.rev_growth)} />
+              <Kv k="盈利增长" v={pct(p.eps_growth)} />
+              <Kv k="前瞻PE" v={fmtNum(p.forward_pe)} />
+              <Kv k="Beta" v={fmtNum(p.beta)} />
+              <Kv k="股息率" v={p.div_yield != null ? `${p.div_yield.toFixed(2)}%` : "—"} />
+              <Kv k="EPS" v={p.eps != null ? `$${p.eps.toFixed(2)}` : "—"} />
+              <Kv k="员工" v={p.employees != null ? p.employees.toLocaleString() : "—"} />
+              <Kv k="52周高" v={p.wk52_high != null ? `$${p.wk52_high.toFixed(0)}` : "—"} />
+              <Kv k="52周低" v={p.wk52_low != null ? `$${p.wk52_low.toFixed(0)}` : "—"} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-xl border bg-card p-4">
         <div className="text-sm font-semibold mb-2">价格走势 · 近 {d.quotes.length} 交易日</div>
