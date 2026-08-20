@@ -50,19 +50,28 @@ def sync_universe(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
-def sync_quotes(conn: sqlite3.Connection, period: str, chunk: int, limit: int | None) -> int:
+def sync_quotes(conn: sqlite3.Connection, period: str, chunk: int, limit: int | None,
+                gap_fill: bool) -> int:
     tickers = [r[0] for r in conn.execute("SELECT ticker FROM us_stocks WHERE is_active=1 ORDER BY ticker")]
+    if gap_fill:
+        # 断点续传:只补"没有最新交易日行情"的股(多轮跑可收敛,规避 Yahoo 单轮限流)
+        latest = conn.execute("SELECT MAX(trade_date) FROM us_daily_quotes").fetchone()[0]
+        if latest:
+            done = {r[0] for r in conn.execute(
+                "SELECT DISTINCT ticker FROM us_daily_quotes WHERE trade_date=?", (latest,))}
+            tickers = [t for t in tickers if t not in done]
     if limit:
         tickers = tickers[:limit]
     total = 0
+    empty_streak = 0
     n_chunks = (len(tickers) + chunk - 1) // chunk
+    print(f"  待拉 {len(tickers)} 只 / {n_chunks} 批")
     for i in range(0, len(tickers), chunk):
         batch = tickers[i:i + chunk]
-        try:
+        rows = fetch_us_quotes_bulk(batch, period=period)
+        if not rows:  # 空批多为 Yahoo 限流 → 冷却后重试一次
+            time.sleep(8)
             rows = fetch_us_quotes_bulk(batch, period=period)
-        except Exception as e:
-            print(f"  批 {i//chunk+1}/{n_chunks} 失败: {str(e)[:60]}")
-            continue
         if rows:
             conn.executemany(
                 """INSERT OR REPLACE INTO us_daily_quotes
@@ -72,13 +81,19 @@ def sync_quotes(conn: sqlite3.Connection, period: str, chunk: int, limit: int | 
             )
             conn.commit()
             total += len(rows)
+            empty_streak = 0
+        else:
+            empty_streak += 1
         print(f"  批 {i//chunk+1}/{n_chunks}: {len(batch)}只 → {len(rows) if rows else 0}行 (累计{total})")
         if (i // chunk) % 3 == 2:
             try:
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             except sqlite3.OperationalError:
                 pass
-        time.sleep(0.5)  # 轻限速,避免 Yahoo 限流
+        if empty_streak >= 8:  # 连续8批空 = 被持续限流,提前收手(下轮再续)
+            print(f"  连续{empty_streak}批空,疑似限流,提前停止(下次 --gap-fill 续)")
+            break
+        time.sleep(1.5)  # 更温和,降低 Yahoo 限流概率
     return total
 
 
@@ -86,8 +101,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--universe-only", action="store_true")
     ap.add_argument("--quotes-period", default="5d")
-    ap.add_argument("--chunk", type=int, default=120)
+    ap.add_argument("--chunk", type=int, default=60)
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--gap-fill", action="store_true", help="只补缺最新行情的股(多轮收敛)")
     args = ap.parse_args()
 
     conn = sqlite3.connect(config.US_DB_PATH, timeout=60)  # 独立库,不碰主库锁
@@ -98,7 +114,7 @@ def main() -> None:
         n = sync_universe(conn)
         print(f"[美股池] 活跃 {n} 只")
         if not args.universe_only:
-            q = sync_quotes(conn, args.quotes_period, args.chunk, args.limit)
+            q = sync_quotes(conn, args.quotes_period, args.chunk, args.limit, args.gap_fill)
             print(f"[美股行情] period={args.quotes_period} 共写入 {q} 行")
     finally:
         try:
