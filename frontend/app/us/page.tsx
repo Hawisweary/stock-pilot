@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 
 type UsRow = {
   ticker: string;
@@ -29,6 +30,7 @@ function fmtVol(v?: number | null) {
 }
 
 export default function UsPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<UsRow[] | null>(null);
   const [asOf, setAsOf] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -116,7 +118,8 @@ export default function UsPage() {
             </thead>
             <tbody>
               {pageRows.map((r) => (
-                <tr key={r.ticker} className="border-t border-border hover:bg-accent/40">
+                <tr key={r.ticker} onClick={() => router.push(`/us/${r.ticker}`)}
+                  className="border-t border-border hover:bg-accent/40 cursor-pointer">
                   <td className="px-3 py-1.5 font-mono text-xs font-semibold">{r.ticker}</td>
                   <td className="px-3 py-1.5 text-xs text-muted-foreground truncate max-w-[220px]">{r.name || "—"}</td>
                   <td className="px-3 py-1.5 text-xs text-muted-foreground">{r.exchange || "—"}</td>

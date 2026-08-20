@@ -149,3 +149,15 @@ def fetch_us_fundamentals_daily(ticker: str) -> dict[str, Any] | None:
         "pe": _f(d.get("peRatio")), "pb": _f(d.get("pbRatio")),
         "peg": _f(d.get("trailingPEG1Y")),
     }
+
+
+def fetch_us_names() -> dict[str, str]:
+    """SEC company_tickers.json 全量 ticker→公司名(一次下载覆盖全市场)。"""
+    import json
+    from urllib.request import Request, urlopen
+
+    # SEC 要求 User-Agent 含联系方式(邮箱),否则 403
+    req = Request("https://www.sec.gov/files/company_tickers.json",
+                  headers={"User-Agent": "StockPilot Research admin@stockpilot.app"})
+    d = json.load(urlopen(req, timeout=30))
+    return {it["ticker"]: it["title"] for it in d.values() if it.get("ticker")}

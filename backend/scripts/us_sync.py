@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
-from services.us_market_adapter import fetch_us_quotes_bulk, fetch_us_universe
+from services.us_market_adapter import fetch_us_names, fetch_us_quotes_bulk, fetch_us_universe
 
 
 def _ensure_tables(conn: sqlite3.Connection) -> None:
@@ -48,6 +48,20 @@ def sync_universe(conn: sqlite3.Connection) -> int:
     )
     conn.commit()
     return len(rows)
+
+
+def sync_names(conn: sqlite3.Connection) -> int:
+    """SEC 全量公司名 → us_stocks.name(一次下载补全市场)。"""
+    try:
+        names = fetch_us_names()
+    except Exception as e:
+        print(f"  补名失败: {str(e)[:60]}"); return 0
+    if not names:
+        return 0
+    conn.executemany("UPDATE us_stocks SET name=? WHERE ticker=?",
+                     [(v, k) for k, v in names.items()])
+    conn.commit()
+    return conn.execute("SELECT COUNT(*) FROM us_stocks WHERE is_active=1 AND name IS NOT NULL").fetchone()[0]
 
 
 def sync_quotes(conn: sqlite3.Connection, period: str, chunk: int, limit: int | None,
@@ -113,6 +127,8 @@ def main() -> None:
         _ensure_tables(conn)
         n = sync_universe(conn)
         print(f"[美股池] 活跃 {n} 只")
+        nm = sync_names(conn)
+        print(f"[美股补名] 已命名 {nm} 只")
         if not args.universe_only:
             q = sync_quotes(conn, args.quotes_period, args.chunk, args.limit, args.gap_fill)
             print(f"[美股行情] period={args.quotes_period} 共写入 {q} 行")

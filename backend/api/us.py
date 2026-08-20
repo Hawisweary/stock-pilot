@@ -63,3 +63,41 @@ async def us_list(
         return {"as_of": latest, "count": len(rows), "stocks": [dict(r) for r in rows]}
     finally:
         conn.close()
+
+
+@router.get("/{ticker}")
+async def us_detail(ticker: str):
+    """单只美股详情:本地行情(近120日)+ Tiingo 实时基本面(市值/PE/PB/PEG)+ 简介。"""
+    ticker = ticker.upper()
+    try:
+        conn = _ro_conn()
+    except sqlite3.OperationalError:
+        return {"error": "美股库未就绪"}
+    try:
+        meta = conn.execute(
+            "SELECT ticker, name, exchange FROM us_stocks WHERE ticker=?", (ticker,)
+        ).fetchone()
+        if not meta:
+            return {"error": "未找到该美股"}
+        q = conn.execute(
+            "SELECT trade_date, close, volume FROM us_daily_quotes WHERE ticker=? "
+            "ORDER BY trade_date DESC LIMIT 120", (ticker,)
+        ).fetchall()
+        quotes = [dict(r) for r in reversed(q)]
+    finally:
+        conn.close()
+
+    result: dict = {"ticker": ticker, "name": meta["name"], "exchange": meta["exchange"],
+                    "quotes": quotes}
+    # 基本面(Tiingo 实时,单只按需)
+    try:
+        from services.us_market_adapter import fetch_us_fundamentals_daily, fetch_us_meta
+        result["fundamentals"] = fetch_us_fundamentals_daily(ticker) or {}
+        m = fetch_us_meta(ticker)
+        if m:
+            result["description"] = m.get("description")
+            if not result["name"]:
+                result["name"] = m.get("name")
+    except Exception as ex:  # noqa: BLE001
+        result["fundamentals"] = {"error": str(ex)[:80]}
+    return result
