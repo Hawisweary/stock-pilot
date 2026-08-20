@@ -17,6 +17,7 @@ DB_PATH = os.path.join(DATA_DIR, "afr.db")
 DB_READ_PATH = os.getenv("AFR_DB_READ_PATH", os.path.join(DATA_DIR, "afr_read.db"))
 # 缓存/日志类表独立库：API 高频小写入与主库批任务写锁彻底解耦
 CACHE_DB_PATH = os.getenv("AFR_CACHE_DB_PATH", os.path.join(DATA_DIR, "cache.db"))
+US_DB_PATH = os.getenv("AFR_US_DB_PATH", os.path.join(DATA_DIR, "us.db"))  # 美股独立库,避开主库锁竞争
 
 # API
 # AFR_AUTH_ALL=true 或 AFR_API_KEY_REQUIRED=true 均可启用全路径鉴权（GET 也需 Key）
@@ -27,6 +28,7 @@ API_KEY_REQUIRED = (
 API_KEY = os.getenv("AFR_API_KEY", "")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 TUSHARE_TOKEN = os.getenv("TUSHARE_TOKEN", "")
+TIINGO_TOKEN = os.getenv("TIINGO_TOKEN", "")  # 美股主源(日线+基本面);yfinance 兜底
 # 日线 EOD 批量行情主源(#60):tencent(默认)| tushare。实时现价始终走腾讯,不受此开关影响。
 QUOTE_SOURCE = os.getenv("AFR_QUOTE_SOURCE", "tencent").lower()
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-pro")
