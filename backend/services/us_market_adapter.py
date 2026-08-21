@@ -103,12 +103,18 @@ def fetch_us_quotes_bulk(tickers: list[str], period: str = "5d") -> list[dict[st
             close = _f(r.get("Close"))
             if close is None or close != close:  # 拦 None 与 NaN(yfinance 偶返NaN行)
                 continue
+            o, h, l = _f(r.get("Open")), _f(r.get("High")), _f(r.get("Low"))
+            adj_close = _f(r.get("Adj Close"))
+            # yfinance 只给 Adj Close;按 adjClose/close 比率把 O/H/L 一并复权
+            ratio = (adj_close / close) if (adj_close and close) else None
             rows.append({
                 "ticker": tk,
                 "trade_date": str(dt.date()),
-                "open": _f(r.get("Open")), "high": _f(r.get("High")),
-                "low": _f(r.get("Low")), "close": close,
-                "adj_close": _f(r.get("Adj Close")), "volume": _f(r.get("Volume")),
+                "open": o, "high": h, "low": l, "close": close,
+                "adj_open": (o * ratio) if (o and ratio) else None,
+                "adj_high": (h * ratio) if (h and ratio) else None,
+                "adj_low": (l * ratio) if (l and ratio) else None,
+                "adj_close": adj_close, "volume": _f(r.get("Volume")),
             })
     return rows
 
@@ -123,7 +129,9 @@ def fetch_us_quote_tiingo(ticker: str, start_date: str) -> list[dict[str, Any]]:
         "trade_date": str(d["date"])[:10],
         "open": _f(d.get("open")), "high": _f(d.get("high")),
         "low": _f(d.get("low")), "close": _f(d.get("close")),
-        "adj_close": _f(d.get("adjClose")), "volume": _f(d.get("volume")),
+        "adj_open": _f(d.get("adjOpen")), "adj_high": _f(d.get("adjHigh")),
+        "adj_low": _f(d.get("adjLow")), "adj_close": _f(d.get("adjClose")),
+        "volume": _f(d.get("volume")),
     } for d in data]
 
 

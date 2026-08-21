@@ -34,6 +34,11 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
         ticker TEXT, trade_date TEXT, open REAL, high REAL, low REAL, close REAL,
         adj_close REAL, volume REAL, PRIMARY KEY (ticker, trade_date))""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_us_quotes_date ON us_daily_quotes(trade_date)")
+    # 迁移:老库补复权 OHLC 列
+    have = {r[1] for r in conn.execute("PRAGMA table_info(us_daily_quotes)")}
+    for col in ("adj_open", "adj_high", "adj_low"):
+        if col not in have:
+            conn.execute(f"ALTER TABLE us_daily_quotes ADD COLUMN {col} REAL")
     conn.commit()
 
 
@@ -104,8 +109,10 @@ def _tiingo_fallback(conn: sqlite3.Connection, cap: int, days_back: int = 10) ->
             continue
         conn.executemany(
             """INSERT OR IGNORE INTO us_daily_quotes
-               (ticker, trade_date, open, high, low, close, adj_close, volume)
-               VALUES (:ticker,:trade_date,:open,:high,:low,:close,:adj_close,:volume)""",
+               (ticker, trade_date, open, high, low, close,
+                adj_open, adj_high, adj_low, adj_close, volume)
+               VALUES (:ticker,:trade_date,:open,:high,:low,:close,
+                :adj_open,:adj_high,:adj_low,:adj_close,:volume)""",
             rows,
         )
         ok += 1
@@ -140,8 +147,10 @@ def sync_quotes(conn: sqlite3.Connection, period: str, chunk: int, limit: int | 
         if rows:
             conn.executemany(
                 """INSERT OR REPLACE INTO us_daily_quotes
-                   (ticker, trade_date, open, high, low, close, adj_close, volume)
-                   VALUES (:ticker,:trade_date,:open,:high,:low,:close,:adj_close,:volume)""",
+                   (ticker, trade_date, open, high, low, close,
+                    adj_open, adj_high, adj_low, adj_close, volume)
+                   VALUES (:ticker,:trade_date,:open,:high,:low,:close,
+                    :adj_open,:adj_high,:adj_low,:adj_close,:volume)""",
                 rows,
             )
             conn.commit()

@@ -25,6 +25,15 @@ def _rw_conn() -> sqlite3.Connection:
     return conn
 
 
+def _migrate_adj(conn: sqlite3.Connection) -> None:
+    """老库补复权 OHLC 列(幂等)。"""
+    have = {r[1] for r in conn.execute("PRAGMA table_info(us_daily_quotes)")}
+    for col in ("adj_open", "adj_high", "adj_low"):
+        if col not in have:
+            conn.execute(f"ALTER TABLE us_daily_quotes ADD COLUMN {col} REAL")
+    conn.commit()
+
+
 # 同一 ticker 并发首刷去重(避免多次点开同时拉 yfinance max)
 _ensuring: set[str] = set()
 _ensure_lock = __import__("threading").Lock()
@@ -43,15 +52,19 @@ def _ensure_history(ticker: str, min_years: float = 3.0) -> None:
         return
     try:
         row = conn.execute(
-            "SELECT COUNT(*), MIN(trade_date) FROM us_daily_quotes WHERE ticker=?", (ticker,)
+            "SELECT COUNT(*), MIN(trade_date), COUNT(adj_open) FROM us_daily_quotes WHERE ticker=?",
+            (ticker,),
         ).fetchone()
         cnt = row[0] if row else 0
         earliest = row[1] if row else None
+        adj_cnt = row[2] if row else 0
+    except sqlite3.OperationalError:  # 老库尚无 adj_open 列
+        cnt, earliest, adj_cnt = 0, None, 0
     finally:
         conn.close()
 
     deep_enough = False
-    if earliest and cnt >= 400:
+    if earliest and cnt >= 400 and adj_cnt >= cnt:  # 需已复权填充,否则重拉一次补 adj
         try:
             years = (dt.date.today() - dt.date.fromisoformat(earliest)).days / 365.25
             deep_enough = years >= min_years
@@ -78,10 +91,13 @@ def _ensure_history(ticker: str, min_years: float = 3.0) -> None:
             return
         conn = _rw_conn()
         try:
+            _migrate_adj(conn)
             conn.executemany(
                 """INSERT OR REPLACE INTO us_daily_quotes
-                   (ticker, trade_date, open, high, low, close, adj_close, volume)
-                   VALUES (:ticker,:trade_date,:open,:high,:low,:close,:adj_close,:volume)""",
+                   (ticker, trade_date, open, high, low, close,
+                    adj_open, adj_high, adj_low, adj_close, volume)
+                   VALUES (:ticker,:trade_date,:open,:high,:low,:close,
+                    :adj_open,:adj_high,:adj_low,:adj_close,:volume)""",
                 bars,
             )
             conn.commit()
@@ -186,9 +202,14 @@ async def us_list(
 
 
 @router.get("/{ticker}/klines")
-def us_klines(ticker: str, freq: str = Query("D", description="D日|W周|M月|Y年")):
-    """K线数据(OHLCV)。首次访问懒加载深历史(yfinance max);周/月/年由日线聚合。
+def us_klines(
+    ticker: str,
+    freq: str = Query("D", description="D日|W周|M月|Y年"),
+    adjust: bool = Query(True, description="是否前复权(默认是;拆股/分红回溯调整)"),
+):
+    """K线数据(OHLCV)。首次访问懒加载深历史(Tiingo优先);周/月/年由日线聚合。
 
+    adjust=True 用复权 OHLC(adj_*),消除拆股断崖;缺复权值时按行回退原始价。
     sync def:FastAPI 用线程池跑,yfinance/聚合的阻塞不冻结事件循环。
     """
     ticker = ticker.upper()
@@ -200,14 +221,27 @@ def us_klines(ticker: str, freq: str = Query("D", description="D日|W周|M月|Y�
         return {"ticker": ticker, "freq": freq, "bars": [], "error": "美股库未就绪"}
     try:
         rows = conn.execute(
-            "SELECT trade_date, open, high, low, close, volume FROM us_daily_quotes "
+            "SELECT trade_date, open, high, low, close, volume, "
+            "adj_open, adj_high, adj_low, adj_close FROM us_daily_quotes "
             "WHERE ticker=? ORDER BY trade_date", (ticker,)
         ).fetchall()
     finally:
         conn.close()
-    daily = [dict(r) for r in rows]
+
+    daily = []
+    for r in rows:
+        m = dict(r)
+        if adjust:  # 复权:有 adj_* 用之,缺则回退该行原始价(逐字段回退,避免半复权错位)
+            o = m["adj_open"] if m["adj_open"] is not None else m["open"]
+            h = m["adj_high"] if m["adj_high"] is not None else m["high"]
+            lo = m["adj_low"] if m["adj_low"] is not None else m["low"]
+            c = m["adj_close"] if m["adj_close"] is not None else m["close"]
+        else:
+            o, h, lo, c = m["open"], m["high"], m["low"], m["close"]
+        daily.append({"trade_date": m["trade_date"], "open": o, "high": h,
+                      "low": lo, "close": c, "volume": m["volume"]})
     bars = _aggregate(daily, freq)
-    return {"ticker": ticker, "freq": freq, "count": len(bars), "bars": bars}
+    return {"ticker": ticker, "freq": freq, "adjust": adjust, "count": len(bars), "bars": bars}
 
 
 @router.get("/{ticker}")

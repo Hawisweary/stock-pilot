@@ -52,6 +52,7 @@ export default function UsDetailPage() {
   const [d, setD] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(true);
   const [freq, setFreq] = useState<Freq>("D");
+  const [adjust, setAdjust] = useState(true);
   const [bars, setBars] = useState<Bar[] | null>(null);
   const [barsLoading, setBarsLoading] = useState(true);
 
@@ -66,12 +67,12 @@ export default function UsDetailPage() {
 
   useEffect(() => {
     setBarsLoading(true);
-    fetch(`/api/us/${ticker}/klines?freq=${freq}`)
+    fetch(`/api/us/${ticker}/klines?freq=${freq}&adjust=${adjust}`)
       .then((r) => r.json())
       .then((j) => setBars(j.bars ?? []))
       .catch(() => setBars([]))
       .finally(() => setBarsLoading(false));
-  }, [ticker, freq]);
+  }, [ticker, freq, adjust]);
 
   if (loading) return <div className="animate-pulse h-96 bg-muted rounded-lg" />;
   if (!d || d.error) return <div className="text-sm text-muted-foreground">未找到该美股（{d?.error ?? ticker}）</div>;
@@ -181,18 +182,30 @@ export default function UsDetailPage() {
       <div className="rounded-xl border bg-card p-4">
         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
           <div className="text-sm font-semibold">K线 · 蜡烛图 + 指标</div>
-          <div className="flex gap-1">
-            {FREQS.map((fq) => (
-              <button
-                key={fq.id}
-                onClick={() => setFreq(fq.id)}
-                className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
-                  freq === fq.id ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent border-border"
-                }`}
-              >
-                {fq.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setAdjust((v) => !v)}
+              title="前复权消除拆股/分红造成的价格断崖"
+              className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                adjust ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent border-border"
+              }`}
+            >
+              {adjust ? "前复权" : "不复权"}
+            </button>
+            <div className="w-px h-4 bg-border" />
+            <div className="flex gap-1">
+              {FREQS.map((fq) => (
+                <button
+                  key={fq.id}
+                  onClick={() => setFreq(fq.id)}
+                  className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                    freq === fq.id ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent border-border"
+                  }`}
+                >
+                  {fq.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         {barsLoading && bars == null ? (
