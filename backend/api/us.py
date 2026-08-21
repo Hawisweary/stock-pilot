@@ -1,7 +1,9 @@
 """美股列表 + 行情 API。读独立库 us.db(只读连接),不参与 A股/ETF 打分。"""
 from __future__ import annotations
 
+import json
 import sqlite3
+import threading
 
 from fastapi import APIRouter, Query
 
@@ -34,9 +36,123 @@ def _migrate_adj(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ensure_profile_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE IF NOT EXISTS us_profile (
+        ticker TEXT PRIMARY KEY, data TEXT, updated_at TEXT)""")
+    conn.commit()
+
+
+def _build_profile(ticker: str) -> dict:
+    """现抓整页可缓存数据:profile(行业/分析师目标价/质量)+ 分析师详情 + Tiingo基本面 + 简介。"""
+    from services.us_market_adapter import (
+        fetch_us_analyst_detail, fetch_us_fundamentals_daily, fetch_us_meta, fetch_us_profile,
+    )
+    data: dict = {}
+    try:
+        data["profile"] = fetch_us_profile(ticker) or {}
+    except Exception as ex:  # noqa: BLE001
+        data["profile"] = {"error": str(ex)[:80]}
+    try:
+        data["analyst"] = fetch_us_analyst_detail(ticker)
+    except Exception as ex:  # noqa: BLE001
+        data["analyst"] = {"error": str(ex)[:80]}
+    try:
+        data["fundamentals"] = fetch_us_fundamentals_daily(ticker) or {}
+    except Exception as ex:  # noqa: BLE001
+        data["fundamentals"] = {"error": str(ex)[:80]}
+    try:
+        m = fetch_us_meta(ticker)
+        if m:
+            data["description"] = m.get("description")
+            data["meta_name"] = m.get("name")
+    except Exception:  # noqa: BLE001
+        pass
+    return data
+
+
+_profile_locks: dict[str, threading.Lock] = {}
+_profile_locks_guard = threading.Lock()
+
+
+def _get_us_profile(ticker: str, ttl_hours: float = 20.0) -> dict:
+    """缓存优先:us_profile 新鲜(TTL内)直接返回;过期/缺失则现抓并回写。
+
+    抓取失败时回退到旧缓存(哪怕过期),避免限流导致整块空白。每 ticker 串行去重,
+    避免同时点开重复拉 yfinance。
+    """
+    import datetime as dt
+
+    try:
+        conn = _rw_conn()
+    except sqlite3.OperationalError:
+        return _build_profile(ticker)
+    try:
+        _ensure_profile_table(conn)
+        row = conn.execute("SELECT data, updated_at FROM us_profile WHERE ticker=?",
+                            (ticker,)).fetchone()
+    finally:
+        conn.close()
+
+    cached, cached_at = (row["data"], row["updated_at"]) if row else (None, None)
+    fresh = False
+    if cached_at:
+        try:
+            age = (dt.datetime.now() - dt.datetime.fromisoformat(cached_at)).total_seconds()
+            fresh = age < ttl_hours * 3600
+        except ValueError:
+            fresh = False
+    if fresh and cached:
+        try:
+            d = json.loads(cached)
+            d["_cached_at"] = cached_at
+            return d
+        except (TypeError, ValueError):
+            pass
+
+    # 需刷新:每 ticker 串行,拿不到锁说明别的请求正在刷,直接用旧缓存
+    with _profile_locks_guard:
+        lock = _profile_locks.setdefault(ticker, threading.Lock())
+    if not lock.acquire(blocking=False):
+        if cached:
+            try:
+                return json.loads(cached)
+            except (TypeError, ValueError):
+                pass
+        return _build_profile(ticker)
+    try:
+        now_iso = dt.datetime.now().isoformat()
+        data = _build_profile(ticker)
+        # 抓取整体失败(profile/analyst 都报错)且有旧缓存 → 用旧缓存
+        prof_err = isinstance(data.get("profile"), dict) and data["profile"].get("error")
+        if prof_err and cached:
+            try:
+                d = json.loads(cached)
+                d["_cached_at"] = cached_at
+                return d
+            except (TypeError, ValueError):
+                pass
+        try:
+            conn = _rw_conn()
+            try:
+                _ensure_profile_table(conn)
+                conn.execute(
+                    "INSERT OR REPLACE INTO us_profile(ticker, data, updated_at) VALUES(?,?,?)",
+                    (ticker, json.dumps(data, ensure_ascii=False), now_iso),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except sqlite3.OperationalError:
+            pass
+        data["_cached_at"] = now_iso
+        return data
+    finally:
+        lock.release()
+
+
 # 同一 ticker 并发首刷去重(避免多次点开同时拉 yfinance max)
 _ensuring: set[str] = set()
-_ensure_lock = __import__("threading").Lock()
+_ensure_lock = threading.Lock()
 
 
 def _ensure_history(ticker: str, min_years: float = 3.0) -> None:
@@ -245,8 +361,12 @@ def us_klines(
 
 
 @router.get("/{ticker}")
-async def us_detail(ticker: str):
-    """单只美股详情:本地行情(近120日)+ Tiingo 实时基本面(市值/PE/PB/PEG)+ 简介。"""
+def us_detail(ticker: str):
+    """单只美股详情:本地行情(近120日)+ 缓存的基本面/分析师(含详细评级分布与逐家动作)+ 简介。
+
+    profile/分析师/基本面走 us_profile 缓存(TTL 20h),当天重复访问秒开、免 yfinance 限流。
+    sync def:FastAPI 用线程池跑,缓存 miss 时的抓取阻塞不冻结事件循环。
+    """
     ticker = ticker.upper()
     try:
         conn = _ro_conn()
@@ -268,21 +388,12 @@ async def us_detail(ticker: str):
 
     result: dict = {"ticker": ticker, "name": meta["name"], "exchange": meta["exchange"],
                     "quotes": quotes}
-    # 基本面(Tiingo 实时,单只按需)
-    try:
-        from services.us_market_adapter import fetch_us_fundamentals_daily, fetch_us_meta
-        result["fundamentals"] = fetch_us_fundamentals_daily(ticker) or {}
-        m = fetch_us_meta(ticker)
-        if m:
-            result["description"] = m.get("description")
-            if not result["name"]:
-                result["name"] = m.get("name")
-    except Exception as ex:  # noqa: BLE001
-        result["fundamentals"] = {"error": str(ex)[:80]}
-    # 富字段(yfinance:行业/分析师目标价/52周/质量成长,单只按需)
-    try:
-        from services.us_market_adapter import fetch_us_profile
-        result["profile"] = fetch_us_profile(ticker) or {}
-    except Exception as ex:  # noqa: BLE001
-        result["profile"] = {"error": str(ex)[:80]}
+    cached = _get_us_profile(ticker)
+    result["profile"] = cached.get("profile") or {}
+    result["analyst"] = cached.get("analyst") or {}
+    result["fundamentals"] = cached.get("fundamentals") or {}
+    result["description"] = cached.get("description")
+    result["cached_at"] = cached.get("_cached_at")
+    if not result["name"]:
+        result["name"] = cached.get("meta_name")
     return result

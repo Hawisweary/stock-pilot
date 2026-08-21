@@ -207,3 +207,67 @@ def fetch_us_profile(ticker: str) -> dict[str, Any] | None:
         "eps": _f(info.get("trailingEps")),
         "employees": info.get("fullTimeEmployees"),
     }
+
+
+def fetch_us_analyst_detail(ticker: str) -> dict[str, Any]:
+    """分析师详细数据:目标价(含中位数)+ 评级分布(强买/买/持有/卖/强卖)+ 逐家券商近期动作。
+
+    数据源 yfinance(聚合 Yahoo 的卖方分析师);单只按需。任一子项失败不影响其余。
+    """
+    import warnings
+
+    import yfinance as yf
+
+    warnings.filterwarnings("ignore")
+    out: dict[str, Any] = {"targets": None, "distribution": None, "actions": []}
+    try:
+        t = yf.Ticker(ticker)
+    except Exception:
+        return out
+
+    # 目标价 current/high/low/mean/median
+    try:
+        pt = t.analyst_price_targets
+        if isinstance(pt, dict) and pt:
+            out["targets"] = {k: _f(v) for k, v in pt.items()
+                              if k in ("current", "high", "low", "mean", "median")}
+    except Exception:
+        pass
+
+    # 评级分布(取最近一期 0m)
+    try:
+        rec = t.recommendations
+        if rec is not None and not rec.empty:
+            row = rec.iloc[0].to_dict()
+            out["distribution"] = {
+                "period": str(row.get("period", "0m")),
+                "strong_buy": int(row.get("strongBuy", 0) or 0),
+                "buy": int(row.get("buy", 0) or 0),
+                "hold": int(row.get("hold", 0) or 0),
+                "sell": int(row.get("sell", 0) or 0),
+                "strong_sell": int(row.get("strongSell", 0) or 0),
+            }
+    except Exception:
+        pass
+
+    # 逐家券商近期评级/目标价动作(最近 12 条)
+    try:
+        ud = t.upgrades_downgrades
+        if ud is not None and not ud.empty:
+            ud = ud.sort_index(ascending=False).head(12)
+            acts = []
+            for idx, r in ud.iterrows():
+                acts.append({
+                    "date": str(idx)[:10],
+                    "firm": str(r.get("Firm", "") or ""),
+                    "action": str(r.get("Action", "") or ""),
+                    "to_grade": str(r.get("ToGrade", "") or ""),
+                    "from_grade": str(r.get("FromGrade", "") or ""),
+                    "target": _f(r.get("currentPriceTarget")),
+                    "prior_target": _f(r.get("priorPriceTarget")),
+                })
+            out["actions"] = acts
+    except Exception:
+        pass
+
+    return out

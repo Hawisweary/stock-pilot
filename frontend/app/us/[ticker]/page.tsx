@@ -26,7 +26,17 @@ type Detail = {
     profit_margin?: number | null; roe?: number | null; rev_growth?: number | null; eps_growth?: number | null;
     eps?: number | null; employees?: number | null; error?: string;
   };
+  analyst?: {
+    targets?: { current?: number | null; high?: number | null; low?: number | null; mean?: number | null; median?: number | null } | null;
+    distribution?: { period?: string; strong_buy?: number; buy?: number; hold?: number; sell?: number; strong_sell?: number } | null;
+    actions?: {
+      date: string; firm: string; action: string; to_grade: string; from_grade: string;
+      target?: number | null; prior_target?: number | null;
+    }[];
+    error?: string;
+  };
   description?: string | null;
+  cached_at?: string | null;
   error?: string;
 };
 
@@ -89,6 +99,17 @@ export default function UsDetailPage() {
   const chg = last?.close != null && prev?.close ? (last.close / prev.close - 1) * 100 : null;
   const f = d.fundamentals && !d.fundamentals.error ? d.fundamentals : null;
   const p = d.profile && !d.profile.error ? d.profile : null;
+  const an = d.analyst && !d.analyst.error ? d.analyst : null;
+  const dist = an?.distribution ?? null;
+  const distTotal = dist ? (dist.strong_buy ?? 0) + (dist.buy ?? 0) + (dist.hold ?? 0) + (dist.sell ?? 0) + (dist.strong_sell ?? 0) : 0;
+  const distSegs = dist ? [
+    { key: "强买", n: dist.strong_buy ?? 0, color: "#16a34a" },
+    { key: "买入", n: dist.buy ?? 0, color: "#4ade80" },
+    { key: "持有", n: dist.hold ?? 0, color: "#9ca3af" },
+    { key: "减持", n: dist.sell ?? 0, color: "#f87171" },
+    { key: "卖出", n: dist.strong_sell ?? 0, color: "#dc2626" },
+  ] : [];
+  const actionCN: Record<string, string> = { init: "首次", main: "维持", reit: "重申", up: "上调", down: "下调" };
 
   const Stat = ({ label, value }: { label: string; value: React.ReactNode }) => (
     <div className="rounded-xl border bg-card p-3">
@@ -182,6 +203,80 @@ export default function UsDetailPage() {
               <Kv k="52周低" v={p.wk52_low != null ? `$${p.wk52_low.toFixed(0)}` : "—"} />
             </div>
           </div>
+        </div>
+      )}
+
+      {an && (distTotal > 0 || (an.actions && an.actions.length > 0)) && (
+        <div className="rounded-xl border bg-card p-4 space-y-4">
+          <div className="flex items-baseline justify-between">
+            <div className="text-sm font-semibold">分析师详情</div>
+            <div className="text-[11px] text-muted-foreground">
+              数据源 Yahoo Finance 聚合 · 卖方分析师{d.cached_at ? ` · 更新 ${d.cached_at.slice(0, 10)}` : ""}
+            </div>
+          </div>
+
+          {distTotal > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>评级分布</span>
+                <span>{distTotal} 位分析师{an.targets?.median != null ? ` · 目标中位数 $${an.targets.median.toFixed(0)}` : ""}</span>
+              </div>
+              <div className="flex h-6 w-full overflow-hidden rounded-md">
+                {distSegs.filter((s) => s.n > 0).map((s) => (
+                  <div key={s.key} style={{ width: `${(s.n / distTotal) * 100}%`, backgroundColor: s.color }}
+                    className="flex items-center justify-center text-[10px] font-medium text-white" title={`${s.key} ${s.n}`}>
+                    {s.n / distTotal > 0.06 ? s.n : ""}
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                {distSegs.map((s) => (
+                  <span key={s.key} className="flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: s.color }} />
+                    {s.key} {s.n}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {an.actions && an.actions.length > 0 && (
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">近期评级动作</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="text-[11px] text-muted-foreground">
+                    <tr className="border-b border-border/60">
+                      <th className="py-1 text-left font-medium">日期</th>
+                      <th className="py-1 text-left font-medium">机构</th>
+                      <th className="py-1 text-left font-medium">动作</th>
+                      <th className="py-1 text-left font-medium">评级</th>
+                      <th className="py-1 text-right font-medium">目标价</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {an.actions.map((a, i) => {
+                      const up = a.target != null && a.prior_target != null && a.prior_target > 0 && a.target > a.prior_target;
+                      const down = a.target != null && a.prior_target != null && a.prior_target > 0 && a.target < a.prior_target;
+                      return (
+                        <tr key={i} className="border-b border-border/30">
+                          <td className="py-1 tabular-nums text-muted-foreground">{a.date}</td>
+                          <td className="py-1 truncate max-w-[140px]">{a.firm || "—"}</td>
+                          <td className="py-1 text-muted-foreground">{actionCN[a.action] ?? a.action}</td>
+                          <td className="py-1">{a.to_grade || "—"}</td>
+                          <td className="py-1 text-right tabular-nums font-medium"
+                            style={{ color: up ? US_UP : down ? US_DOWN : undefined }}>
+                            {a.target != null ? `$${a.target.toFixed(0)}` : "—"}
+                            {up ? " ↑" : down ? " ↓" : ""}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
