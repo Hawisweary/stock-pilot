@@ -35,6 +35,10 @@ type Detail = {
     }[];
     error?: string;
   };
+  accuracy?: {
+    n: number; horizon_days: number; direction_pct: number; reach_pct: number;
+    mape_pct: number; bias_pct: number; eval_from?: string; eval_to?: string;
+  } | null;
   description?: string | null;
   cached_at?: string | null;
   error?: string;
@@ -110,6 +114,17 @@ export default function UsDetailPage() {
     { key: "卖出", n: dist.strong_sell ?? 0, color: "#dc2626" },
   ] : [];
   const actionCN: Record<string, string> = { init: "首次", main: "维持", reit: "重申", up: "上调", down: "下调" };
+
+  const acc = d.accuracy ?? null;
+  // 偏差判定:正=目标价系统性高于真实价(过度乐观);负=低于(过度保守)
+  const biasVerdict = acc == null ? null
+    : acc.bias_pct > 10 ? { label: "偏乐观", color: US_DOWN, note: "目标价系统性高于真实价" }
+    : acc.bias_pct < -10 ? { label: "偏保守", color: US_UP, note: "目标价系统性低于真实价" }
+    : { label: "较中性", color: "var(--muted-foreground)", note: "目标价与真实价大体相符" };
+  const dirVerdict = acc == null ? null
+    : acc.direction_pct >= 70 ? "方向可信"
+    : acc.direction_pct >= 55 ? "方向一般"
+    : "方向参考价值低";
 
   const Stat = ({ label, value }: { label: string; value: React.ReactNode }) => (
     <div className="rounded-xl border bg-card p-3">
@@ -277,6 +292,55 @@ export default function UsDetailPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {acc && (
+        <div className="rounded-xl border bg-card p-4 space-y-3">
+          <div className="flex items-baseline justify-between flex-wrap gap-2">
+            <div className="text-sm font-semibold">
+              分析师准确度
+              {biasVerdict && (
+                <span className="ml-2 text-[11px] font-bold px-2 py-0.5 rounded"
+                  style={{ backgroundColor: biasVerdict.color, color: "#fff" }}>
+                  {biasVerdict.label}
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              回测 {acc.n} 条历史目标 · {Math.round(acc.horizon_days / 30)}个月前瞻 · {acc.eval_from}~{acc.eval_to}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="rounded-lg border bg-background p-2.5">
+              <div className="text-[11px] text-muted-foreground">方向准确率</div>
+              <div className="text-lg font-bold tabular-nums">{acc.direction_pct}%</div>
+              <div className="text-[10px] text-muted-foreground">{dirVerdict}</div>
+            </div>
+            <div className="rounded-lg border bg-background p-2.5">
+              <div className="text-[11px] text-muted-foreground">12月内触及目标</div>
+              <div className="text-lg font-bold tabular-nums">{acc.reach_pct}%</div>
+              <div className="text-[10px] text-muted-foreground">目标价被摸到的比例</div>
+            </div>
+            <div className="rounded-lg border bg-background p-2.5">
+              <div className="text-[11px] text-muted-foreground">平均误差 MAPE</div>
+              <div className="text-lg font-bold tabular-nums">{acc.mape_pct}%</div>
+              <div className="text-[10px] text-muted-foreground">越低越准</div>
+            </div>
+            <div className="rounded-lg border bg-background p-2.5">
+              <div className="text-[11px] text-muted-foreground">系统性偏差</div>
+              <div className="text-lg font-bold tabular-nums" style={{ color: biasVerdict?.color }}>
+                {acc.bias_pct > 0 ? "+" : ""}{acc.bias_pct}%
+              </div>
+              <div className="text-[10px] text-muted-foreground">{biasVerdict?.note}</div>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            方法:取发布满 {Math.round(acc.horizon_days / 30)} 个月的历史目标价,与复权后真实价对照(消除拆股)。
+            目标价为 12 个月前瞻,单看数字无意义——要看这只票历史上分析师<b>是高估还是低估、方向准不准</b>。逐股口径,不可跨股比较。
+          </p>
         </div>
       )}
 

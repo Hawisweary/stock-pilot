@@ -42,6 +42,89 @@ def _ensure_profile_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _compute_accuracy(ticker: str, horizon_days: int = 365, min_samples: int = 20) -> dict | None:
+    """分析师目标价准确度回测:满 horizon 的历史目标 vs 复权后真实价。
+
+    方向准确率/命中率/MAPE/系统性偏差。目标价与真实价均复权到同基准(消除拆股)。
+    """
+    import bisect
+    import datetime as dt
+
+    from services.us_market_adapter import fetch_us_target_history
+
+    _ensure_history(ticker)  # 回测需深历史,先确保
+    try:
+        conn = _ro_conn()
+    except sqlite3.OperationalError:
+        return None
+    try:
+        rows = conn.execute(
+            "SELECT trade_date, close, adj_close FROM us_daily_quotes "
+            "WHERE ticker=? AND adj_close IS NOT NULL ORDER BY trade_date", (ticker,)
+        ).fetchall()
+    finally:
+        conn.close()
+    if len(rows) < 200:
+        return None
+    dates = [r["trade_date"] for r in rows]
+    close = {r["trade_date"]: r["close"] for r in rows}
+    adj = {r["trade_date"]: r["adj_close"] for r in rows}
+
+    targets = fetch_us_target_history(ticker)
+    if not targets:
+        return None
+
+    def near(d: str):  # 最近的有价交易日(>=d)
+        i = bisect.bisect_left(dates, d)
+        return dates[i] if i < len(dates) else None
+
+    today = dt.date.today()
+    errs: list[float] = []
+    biases: list[float] = []
+    dir_hit = reach = n = 0
+    for t in targets:
+        try:
+            d = dt.date.fromisoformat(t["date"])
+        except (ValueError, KeyError):
+            continue
+        if (today - d).days < horizon_days:
+            continue
+        d0 = near(d.isoformat())
+        dH = near((d + dt.timedelta(days=horizon_days)).isoformat())
+        if not d0 or not dH or d0 not in close or dH not in adj:
+            continue
+        c0 = close[d0]
+        if not c0:
+            continue
+        ratio = adj[d0] / c0
+        tgt_adj = t["target"] * ratio
+        p0, pH = adj[d0], adj[dH]
+        if pH <= 0:
+            continue
+        n += 1
+        errs.append(abs(tgt_adj - pH) / pH)
+        biases.append((tgt_adj - pH) / pH)
+        if (tgt_adj > p0) == (pH > p0):
+            dir_hit += 1
+        i0, iH = bisect.bisect_left(dates, d0), bisect.bisect_left(dates, dH)
+        seg = [adj[x] for x in dates[i0:iH + 1]]
+        if seg and ((tgt_adj >= p0 and max(seg) >= tgt_adj) or (tgt_adj < p0 and min(seg) <= tgt_adj)):
+            reach += 1
+    if n < min_samples:
+        return None
+    bias = sum(biases) / n
+    return {
+        "n": n,
+        "horizon_days": horizon_days,
+        "direction_pct": round(dir_hit / n * 100),
+        "reach_pct": round(reach / n * 100),
+        "mape_pct": round(sum(errs) / n * 100),
+        "bias_pct": round(bias * 100),
+        "eval_from": min(t["date"] for t in targets if (today - dt.date.fromisoformat(t["date"])).days >= horizon_days),
+        "eval_to": max((d for d in dates), default=None),
+    }
+
+
 def _build_profile(ticker: str) -> dict:
     """现抓整页可缓存数据:profile(行业/分析师目标价/质量)+ 分析师详情 + Tiingo基本面 + 简介。"""
     from services.us_market_adapter import (
@@ -56,6 +139,10 @@ def _build_profile(ticker: str) -> dict:
         data["analyst"] = fetch_us_analyst_detail(ticker)
     except Exception as ex:  # noqa: BLE001
         data["analyst"] = {"error": str(ex)[:80]}
+    try:
+        data["accuracy"] = _compute_accuracy(ticker)  # None 表示样本不足/无覆盖
+    except Exception:  # noqa: BLE001
+        data["accuracy"] = None
     try:
         data["fundamentals"] = fetch_us_fundamentals_daily(ticker) or {}
     except Exception as ex:  # noqa: BLE001
@@ -391,6 +478,7 @@ def us_detail(ticker: str):
     cached = _get_us_profile(ticker)
     result["profile"] = cached.get("profile") or {}
     result["analyst"] = cached.get("analyst") or {}
+    result["accuracy"] = cached.get("accuracy")
     result["fundamentals"] = cached.get("fundamentals") or {}
     result["description"] = cached.get("description")
     result["cached_at"] = cached.get("_cached_at")

@@ -271,3 +271,28 @@ def fetch_us_analyst_detail(ticker: str) -> dict[str, Any]:
         pass
 
     return out
+
+
+def fetch_us_target_history(ticker: str) -> list[dict[str, Any]]:
+    """全量历史目标价(带日期),供"分析师准确度"回测用。返回 [{date, target}] 升序。"""
+    import warnings
+
+    import yfinance as yf
+
+    warnings.filterwarnings("ignore")
+    try:
+        ud = yf.Ticker(ticker).upgrades_downgrades
+    except Exception:
+        return []
+    if ud is None or ud.empty or "currentPriceTarget" not in ud:
+        return []
+    try:
+        ud = ud[ud["currentPriceTarget"] > 0].sort_index()
+    except Exception:
+        return []
+    out = []
+    for idx, r in ud.iterrows():
+        tgt = _f(r.get("currentPriceTarget"))
+        if tgt:
+            out.append({"date": str(idx)[:10], "target": tgt})
+    return out
