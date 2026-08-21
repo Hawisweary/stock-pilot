@@ -75,30 +75,41 @@ def sync_names(conn: sqlite3.Connection) -> int:
 
 
 def _tiingo_fallback(conn: sqlite3.Connection, cap: int, days_back: int = 10) -> int:
-    """yfinance 拉不到时的 Tiingo 兜底:只补「曾有历史、但缺最新交易日」的股。
+    """yfinance 拉不到时的 Tiingo 兜底,两类目标:
+    ① 曾有历史、但缺最新交易日 —— NVDA/TSLA 这类必点大票 yfinance 批量常年反复失败;
+    ② 零历史、但近期新上市(startDate 近 120 天)—— SpaceX(SPCX)这类新 IPO,
+       Yahoo 还没收录,「曾有历史」过滤会永久漏掉,故按上市日兜底一次开个头。
 
-    NVDA/TSLA 这类必点大票 yfinance 批量常年反复失败,双轨在此收口。限「曾有历史」→
-    自然排除大量从未拉过的中小新票(交给 yfinance 慢慢收敛),再叠 cap 硬顶保护免费额度。
+    「曾有历史 / 近期IPO」两条都是有界小集合(大票+新股),叠 cap 硬顶护 Tiingo 免费额度;
+    大量从未拉过的存量中小票不进兜底,交给 yfinance 慢慢收敛。
     """
     if not config.TIINGO_TOKEN or cap <= 0:
         return 0
     latest = conn.execute("SELECT MAX(trade_date) FROM us_daily_quotes").fetchone()[0]
     if not latest:
         return 0
-    # 缺最新日、但历史里出现过的活跃股(即真·当日缺口,而非从没拉过)
-    targets = [r[0] for r in conn.execute(
+    import datetime as _dt
+    ipo_since = (_dt.date.fromisoformat(latest) - _dt.timedelta(days=120)).isoformat()
+    # ① 优先:曾有历史、但缺最新日(大票每日缺口,先补)
+    priority = [r[0] for r in conn.execute(
         """SELECT s.ticker FROM us_stocks s
            WHERE s.is_active=1
              AND EXISTS (SELECT 1 FROM us_daily_quotes q WHERE q.ticker=s.ticker)
              AND NOT EXISTS (SELECT 1 FROM us_daily_quotes q
                              WHERE q.ticker=s.ticker AND q.trade_date=?)
            ORDER BY s.ticker""", (latest,))]
+    # ② 零历史的近期新上市普通股(排除含'-'的单位/优先股、'W'结尾的权证)
+    ipos = [r[0] for r in conn.execute(
+        """SELECT s.ticker FROM us_stocks s
+           WHERE s.is_active=1 AND s.start_date >= ?
+             AND s.ticker NOT LIKE '%-%' AND s.ticker NOT LIKE '%W'
+             AND NOT EXISTS (SELECT 1 FROM us_daily_quotes q WHERE q.ticker=s.ticker)
+           ORDER BY s.ticker""", (ipo_since,))]
+    targets = (priority + ipos)[:cap]
     if not targets:
         return 0
-    targets = targets[:cap]
-    import datetime as _dt
     start = (_dt.date.fromisoformat(latest) - _dt.timedelta(days=days_back)).isoformat()
-    print(f"  [Tiingo兜底] 当日缺口 {len(targets)} 只(cap={cap})")
+    print(f"  [Tiingo兜底] 缺口/新股 {len(targets)} 只(cap={cap})")
     ok = total = 0
     for t in targets:
         try:

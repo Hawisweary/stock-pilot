@@ -14,11 +14,14 @@ type UsRow = {
 
 type Sort = "dollar_vol" | "pct_chg" | "close" | "volume";
 
+// 美股惯例:涨绿跌红(与A股相反)。项目 --up=红/--down=绿,故直接用绿/红常量,与K线配色一致
+const US_UP = "#22c55e";
+const US_DOWN = "#ef4444";
+
 function pctColor(v?: number | null) {
   if (v == null) return "var(--muted-foreground)";
-  // 美股惯例:涨绿跌红(与A股相反)。用中性 up/down 变量,这里保持项目 up=红,故直接映射颜色
-  if (v > 0) return "var(--up)";
-  if (v < 0) return "var(--down)";
+  if (v > 0) return US_UP;
+  if (v < 0) return US_DOWN;
   return "var(--muted-foreground)";
 }
 

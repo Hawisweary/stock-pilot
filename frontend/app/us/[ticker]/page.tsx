@@ -30,12 +30,16 @@ type Detail = {
   error?: string;
 };
 
+// 美股惯例:涨绿跌红(与A股相反),与K线配色一致
+const US_UP = "#22c55e";
+const US_DOWN = "#ef4444";
+
 const RATING_CN: Record<string, { label: string; color: string }> = {
-  strong_buy: { label: "强烈买入", color: "var(--up)" },
-  buy: { label: "买入", color: "var(--up)" },
+  strong_buy: { label: "强烈买入", color: US_UP },
+  buy: { label: "买入", color: US_UP },
   hold: { label: "持有", color: "var(--muted-foreground)" },
-  underperform: { label: "减持", color: "var(--down)" },
-  sell: { label: "卖出", color: "var(--down)" },
+  underperform: { label: "减持", color: US_DOWN },
+  sell: { label: "卖出", color: US_DOWN },
 };
 const pct = (v?: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
 
@@ -115,7 +119,7 @@ export default function UsDetailPage() {
         </div>
         <div className="text-right">
           <div className="text-2xl font-bold tabular-nums">{last?.close != null ? `$${last.close.toFixed(2)}` : "—"}</div>
-          <div className="text-sm font-medium tabular-nums" style={{ color: (chg ?? 0) > 0 ? "var(--up)" : (chg ?? 0) < 0 ? "var(--down)" : "var(--muted-foreground)" }}>
+          <div className="text-sm font-medium tabular-nums" style={{ color: (chg ?? 0) > 0 ? US_UP : (chg ?? 0) < 0 ? US_DOWN : "var(--muted-foreground)" }}>
             {chg != null ? `${chg > 0 ? "+" : ""}${chg.toFixed(2)}%` : "—"}
             <span className="text-muted-foreground ml-1 font-normal">{last?.trade_date}</span>
           </div>
@@ -148,7 +152,7 @@ export default function UsDetailPage() {
                   <span className="text-2xl font-bold tabular-nums">${p.target_mean.toFixed(0)}</span>
                   {last?.close != null && (
                     <span className="text-sm font-medium tabular-nums"
-                      style={{ color: p.target_mean > last.close ? "var(--up)" : "var(--down)" }}>
+                      style={{ color: p.target_mean > last.close ? US_UP : US_DOWN }}>
                       {p.target_mean > last.close ? "+" : ""}{((p.target_mean / last.close - 1) * 100).toFixed(1)}% 空间
                     </span>
                   )}
