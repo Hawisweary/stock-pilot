@@ -17,7 +17,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
-from services.us_market_adapter import fetch_us_names, fetch_us_quotes_bulk, fetch_us_universe
+from services.us_market_adapter import (
+    fetch_us_names,
+    fetch_us_quote_tiingo,
+    fetch_us_quotes_bulk,
+    fetch_us_universe,
+)
 
 
 def _ensure_tables(conn: sqlite3.Connection) -> None:
@@ -64,8 +69,54 @@ def sync_names(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM us_stocks WHERE is_active=1 AND name IS NOT NULL").fetchone()[0]
 
 
+def _tiingo_fallback(conn: sqlite3.Connection, cap: int, days_back: int = 10) -> int:
+    """yfinance 拉不到时的 Tiingo 兜底:只补「曾有历史、但缺最新交易日」的股。
+
+    NVDA/TSLA 这类必点大票 yfinance 批量常年反复失败,双轨在此收口。限「曾有历史」→
+    自然排除大量从未拉过的中小新票(交给 yfinance 慢慢收敛),再叠 cap 硬顶保护免费额度。
+    """
+    if not config.TIINGO_TOKEN or cap <= 0:
+        return 0
+    latest = conn.execute("SELECT MAX(trade_date) FROM us_daily_quotes").fetchone()[0]
+    if not latest:
+        return 0
+    # 缺最新日、但历史里出现过的活跃股(即真·当日缺口,而非从没拉过)
+    targets = [r[0] for r in conn.execute(
+        """SELECT s.ticker FROM us_stocks s
+           WHERE s.is_active=1
+             AND EXISTS (SELECT 1 FROM us_daily_quotes q WHERE q.ticker=s.ticker)
+             AND NOT EXISTS (SELECT 1 FROM us_daily_quotes q
+                             WHERE q.ticker=s.ticker AND q.trade_date=?)
+           ORDER BY s.ticker""", (latest,))]
+    if not targets:
+        return 0
+    targets = targets[:cap]
+    import datetime as _dt
+    start = (_dt.date.fromisoformat(latest) - _dt.timedelta(days=days_back)).isoformat()
+    print(f"  [Tiingo兜底] 当日缺口 {len(targets)} 只(cap={cap})")
+    ok = total = 0
+    for t in targets:
+        try:
+            rows = [r for r in fetch_us_quote_tiingo(t, start) if r["close"] is not None]
+        except Exception:
+            continue  # 单只失败不影响整体(瞬时 SSL/限流)
+        if not rows:
+            continue
+        conn.executemany(
+            """INSERT OR IGNORE INTO us_daily_quotes
+               (ticker, trade_date, open, high, low, close, adj_close, volume)
+               VALUES (:ticker,:trade_date,:open,:high,:low,:close,:adj_close,:volume)""",
+            rows,
+        )
+        ok += 1
+        total += len(rows)
+    conn.commit()
+    print(f"  [Tiingo兜底] 补齐 {ok}/{len(targets)} 只, 共 {total} 行")
+    return total
+
+
 def sync_quotes(conn: sqlite3.Connection, period: str, chunk: int, limit: int | None,
-                gap_fill: bool) -> int:
+                gap_fill: bool, tiingo_cap: int = 0) -> int:
     tickers = [r[0] for r in conn.execute("SELECT ticker FROM us_stocks WHERE is_active=1 ORDER BY ticker")]
     if gap_fill:
         # 断点续传:只补"没有最新交易日行情"的股(多轮跑可收敛,规避 Yahoo 单轮限流)
@@ -108,6 +159,7 @@ def sync_quotes(conn: sqlite3.Connection, period: str, chunk: int, limit: int | 
             print(f"  连续{empty_streak}批空,疑似限流,提前停止(下次 --gap-fill 续)")
             break
         time.sleep(1.5)  # 更温和,降低 Yahoo 限流概率
+    total += _tiingo_fallback(conn, tiingo_cap)  # yfinance 缺口 → Tiingo 收口
     return total
 
 
@@ -118,6 +170,8 @@ def main() -> None:
     ap.add_argument("--chunk", type=int, default=60)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--gap-fill", action="store_true", help="只补缺最新行情的股(多轮收敛)")
+    ap.add_argument("--tiingo-cap", type=int, default=300,
+                    help="Tiingo 兜底当日缺口的上限(护免费额度;0=关闭兜底)")
     args = ap.parse_args()
 
     conn = sqlite3.connect(config.US_DB_PATH, timeout=60)  # 独立库,不碰主库锁
@@ -130,7 +184,8 @@ def main() -> None:
         nm = sync_names(conn)
         print(f"[美股补名] 已命名 {nm} 只")
         if not args.universe_only:
-            q = sync_quotes(conn, args.quotes_period, args.chunk, args.limit, args.gap_fill)
+            q = sync_quotes(conn, args.quotes_period, args.chunk, args.limit,
+                            args.gap_fill, args.tiingo_cap)
             print(f"[美股行情] period={args.quotes_period} 共写入 {q} 行")
     finally:
         try:
