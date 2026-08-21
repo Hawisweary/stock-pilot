@@ -274,7 +274,10 @@ def fetch_us_analyst_detail(ticker: str) -> dict[str, Any]:
 
 
 def fetch_us_target_history(ticker: str) -> list[dict[str, Any]]:
-    """全量历史目标价(带日期),供"分析师准确度"回测用。返回 [{date, target}] 升序。"""
+    """全量历史评级/目标价(带日期),供"分析师准确度"回测用。
+
+    返回 [{date, target(可空), grade}] 升序。target 用于目标价回测,grade 用于评级方向回测。
+    """
     import warnings
 
     import yfinance as yf
@@ -284,15 +287,17 @@ def fetch_us_target_history(ticker: str) -> list[dict[str, Any]]:
         ud = yf.Ticker(ticker).upgrades_downgrades
     except Exception:
         return []
-    if ud is None or ud.empty or "currentPriceTarget" not in ud:
+    if ud is None or ud.empty:
         return []
     try:
-        ud = ud[ud["currentPriceTarget"] > 0].sort_index()
+        ud = ud.sort_index()
     except Exception:
         return []
     out = []
     for idx, r in ud.iterrows():
-        tgt = _f(r.get("currentPriceTarget"))
-        if tgt:
-            out.append({"date": str(idx)[:10], "target": tgt})
+        out.append({
+            "date": str(idx)[:10],
+            "target": _f(r.get("currentPriceTarget")),
+            "grade": str(r.get("ToGrade", "") or "").strip(),
+        })
     return out

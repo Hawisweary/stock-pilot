@@ -38,6 +38,12 @@ type Detail = {
   accuracy?: {
     n: number; horizon_days: number; direction_pct: number; reach_pct: number;
     mape_pct: number; bias_pct: number; eval_from?: string; eval_to?: string;
+    rating?: {
+      horizon_days: number;
+      bull_n?: number; bull_win_pct?: number; bull_avg_pct?: number;
+      bear_n?: number; bear_win_pct?: number; bear_avg_pct?: number;
+      spread_pct?: number;
+    } | null;
   } | null;
   description?: string | null;
   cached_at?: string | null;
@@ -337,9 +343,48 @@ export default function UsDetailPage() {
             </div>
           </div>
 
+          {acc.rating && (
+            <div className="rounded-lg border bg-background p-3 space-y-2">
+              <div className="flex items-baseline justify-between flex-wrap gap-2">
+                <div className="text-xs font-semibold">评级方向验证 · 后 {Math.round((acc.rating.horizon_days) / 30)} 个月</div>
+                {acc.rating.spread_pct != null && (
+                  <div className="text-[11px]">
+                    <span className="text-muted-foreground">多空价差 </span>
+                    <span className="font-bold tabular-nums" style={{ color: acc.rating.spread_pct > 0 ? US_UP : US_DOWN }}>
+                      {acc.rating.spread_pct > 0 ? "+" : ""}{acc.rating.spread_pct}%
+                    </span>
+                    <span className="text-muted-foreground">
+                      {" "}· {acc.rating.spread_pct >= 5 ? "评级有区分力" : acc.rating.spread_pct <= 0 ? "区分力弱(牛股普涨)" : "区分力一般"}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                {acc.rating.bull_n != null && (
+                  <div className="flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5"
+                    style={{ backgroundColor: "color-mix(in srgb, var(--up) 8%, transparent)" }}>
+                    <span className="font-medium" style={{ color: US_UP }}>看涨评级</span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {acc.rating.bull_n}次 · 后市上涨 <b className="text-foreground">{acc.rating.bull_win_pct}%</b> · 均 {(acc.rating.bull_avg_pct ?? 0) > 0 ? "+" : ""}{acc.rating.bull_avg_pct}%
+                    </span>
+                  </div>
+                )}
+                {acc.rating.bear_n != null && (
+                  <div className="flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5"
+                    style={{ backgroundColor: "color-mix(in srgb, var(--down) 8%, transparent)" }}>
+                    <span className="font-medium" style={{ color: US_DOWN }}>看空评级</span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {acc.rating.bear_n}次 · 后市下跌 <b className="text-foreground">{acc.rating.bear_win_pct}%</b> · 均 {(acc.rating.bear_avg_pct ?? 0) > 0 ? "+" : ""}{acc.rating.bear_avg_pct}%
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <p className="text-[11px] text-muted-foreground leading-relaxed">
-            方法:取发布满 {Math.round(acc.horizon_days / 30)} 个月的历史目标价,与复权后真实价对照(消除拆股)。
-            目标价为 12 个月前瞻,单看数字无意义——要看这只票历史上分析师<b>是高估还是低估、方向准不准</b>。逐股口径,不可跨股比较。
+            方法:取发布满 {Math.round(acc.horizon_days / 30)} 个月的历史目标价/评级,与复权后真实价对照(消除拆股)。
+            目标价看<b>高估/低估</b>,评级看<b>方向对不对</b>;牛股里"上涨概率"会普遍虚高,真正的信号是<b>多空价差</b>(看涨组比看空组多涨多少)。逐股口径,不可跨股比较。
           </p>
         </div>
       )}

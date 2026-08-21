@@ -42,6 +42,25 @@ def _ensure_profile_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+_BULL_GRADES = {"buy", "strong buy", "overweight", "outperform", "accumulate", "add", "positive",
+                "market outperform", "sector outperform", "conviction buy", "top pick",
+                "long-term buy", "outperformer", "speculative buy", "gradually accumulate"}
+_BEAR_GRADES = {"sell", "strong sell", "underweight", "underperform", "reduce", "negative",
+                "market underperform", "sector underperform", "underperformer"}
+
+
+def _grade_dir(grade: str) -> str | None:
+    """券商评级 → 方向:bull(看涨)/bear(看空)/None(中性或无法判定)。"""
+    g = (grade or "").strip().lower()
+    if not g:
+        return None
+    if g in _BULL_GRADES:
+        return "bull"
+    if g in _BEAR_GRADES:
+        return "bear"
+    return None  # 中性(hold/neutral/equal-weight/market perform…)不计入方向验证
+
+
 def _compute_accuracy(ticker: str, horizon_days: int = 365, min_samples: int = 20) -> dict | None:
     """分析师目标价准确度回测:满 horizon 的历史目标 vs 复权后真实价。
 
@@ -82,6 +101,9 @@ def _compute_accuracy(ticker: str, horizon_days: int = 365, min_samples: int = 2
     errs: list[float] = []
     biases: list[float] = []
     dir_hit = reach = n = 0
+    # 评级方向验证:看涨评级后是否真涨、看空后是否真跌
+    bull_rets: list[float] = []
+    bear_rets: list[float] = []
     for t in targets:
         try:
             d = dt.date.fromisoformat(t["date"])
@@ -93,14 +115,24 @@ def _compute_accuracy(ticker: str, horizon_days: int = 365, min_samples: int = 2
         dH = near((d + dt.timedelta(days=horizon_days)).isoformat())
         if not d0 or not dH or d0 not in close or dH not in adj:
             continue
-        c0 = close[d0]
-        if not c0:
-            continue
-        ratio = adj[d0] / c0
-        tgt_adj = t["target"] * ratio
         p0, pH = adj[d0], adj[dH]
-        if pH <= 0:
+        if p0 <= 0 or pH <= 0:
             continue
+        fr = pH / p0 - 1  # horizon 内复权真实收益
+
+        # (a) 评级方向
+        gd = _grade_dir(t.get("grade", ""))
+        if gd == "bull":
+            bull_rets.append(fr)
+        elif gd == "bear":
+            bear_rets.append(fr)
+
+        # (b) 目标价(仅带目标价的记录)
+        tgt = t.get("target")
+        c0 = close[d0]
+        if not tgt or tgt <= 0 or not c0:
+            continue
+        tgt_adj = tgt * (adj[d0] / c0)
         n += 1
         errs.append(abs(tgt_adj - pH) / pH)
         biases.append((tgt_adj - pH) / pH)
@@ -112,6 +144,22 @@ def _compute_accuracy(ticker: str, horizon_days: int = 365, min_samples: int = 2
             reach += 1
     if n < min_samples:
         return None
+
+    rating = None
+    if len(bull_rets) >= 10 or len(bear_rets) >= 10:
+        rating = {"horizon_days": horizon_days}
+        if bull_rets:
+            rating["bull_n"] = len(bull_rets)
+            rating["bull_win_pct"] = round(sum(1 for r in bull_rets if r > 0) / len(bull_rets) * 100)
+            rating["bull_avg_pct"] = round(sum(bull_rets) / len(bull_rets) * 100, 1)
+        if bear_rets:
+            rating["bear_n"] = len(bear_rets)
+            rating["bear_win_pct"] = round(sum(1 for r in bear_rets if r < 0) / len(bear_rets) * 100)
+            rating["bear_avg_pct"] = round(sum(bear_rets) / len(bear_rets) * 100, 1)
+        if bull_rets and bear_rets:  # 多空价差:看涨组比看空组多涨多少(正=评级有区分力)
+            rating["spread_pct"] = round((sum(bull_rets) / len(bull_rets)
+                                          - sum(bear_rets) / len(bear_rets)) * 100, 1)
+
     bias = sum(biases) / n
     return {
         "n": n,
@@ -122,6 +170,7 @@ def _compute_accuracy(ticker: str, horizon_days: int = 365, min_samples: int = 2
         "bias_pct": round(bias * 100),
         "eval_from": min(t["date"] for t in targets if (today - dt.date.fromisoformat(t["date"])).days >= horizon_days),
         "eval_to": max((d for d in dates), default=None),
+        "rating": rating,
     }
 
 
