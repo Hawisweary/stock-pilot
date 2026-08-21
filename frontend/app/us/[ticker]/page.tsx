@@ -2,7 +2,13 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { KLineChart } from "@/components/KLineChart";
+
+type Bar = { trade_date: string; open: number; high: number; low: number; close: number; volume: number | null };
+type Freq = "D" | "W" | "M" | "Y";
+const FREQS: { id: Freq; label: string }[] = [
+  { id: "D", label: "日K" }, { id: "W", label: "周K" }, { id: "M", label: "月K" }, { id: "Y", label: "年K" },
+];
 
 type Quote = { trade_date: string; close: number | null; volume: number | null };
 type Detail = {
@@ -45,6 +51,9 @@ export default function UsDetailPage() {
   const router = useRouter();
   const [d, setD] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [freq, setFreq] = useState<Freq>("D");
+  const [bars, setBars] = useState<Bar[] | null>(null);
+  const [barsLoading, setBarsLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
@@ -55,11 +64,19 @@ export default function UsDetailPage() {
       .finally(() => setLoading(false));
   }, [ticker]);
 
+  useEffect(() => {
+    setBarsLoading(true);
+    fetch(`/api/us/${ticker}/klines?freq=${freq}`)
+      .then((r) => r.json())
+      .then((j) => setBars(j.bars ?? []))
+      .catch(() => setBars([]))
+      .finally(() => setBarsLoading(false));
+  }, [ticker, freq]);
+
   if (loading) return <div className="animate-pulse h-96 bg-muted rounded-lg" />;
   if (!d || d.error) return <div className="text-sm text-muted-foreground">未找到该美股（{d?.error ?? ticker}）</div>;
 
   const valid = d.quotes.filter((q) => q.close != null);
-  const chart = valid.map((q) => ({ date: q.trade_date.slice(5), close: q.close }));
   const last = valid[valid.length - 1];
   const prev = valid[valid.length - 2];
   const chg = last?.close != null && prev?.close ? (last.close / prev.close - 1) * 100 : null;
@@ -162,17 +179,32 @@ export default function UsDetailPage() {
       )}
 
       <div className="rounded-xl border bg-card p-4">
-        <div className="text-sm font-semibold mb-2">价格走势 · 近 {d.quotes.length} 交易日</div>
-        {chart.length > 1 ? (
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={chart} margin={{ top: 5, right: 8, left: -8, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={40} stroke="var(--muted-foreground)" />
-              <YAxis domain={["auto", "auto"]} tick={{ fontSize: 10 }} width={52} stroke="var(--muted-foreground)" />
-              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--card)" }} />
-              <Line type="monotone" dataKey="close" stroke="var(--up)" dot={false} strokeWidth={1.6} />
-            </LineChart>
-          </ResponsiveContainer>
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <div className="text-sm font-semibold">K线 · 蜡烛图 + 指标</div>
+          <div className="flex gap-1">
+            {FREQS.map((fq) => (
+              <button
+                key={fq.id}
+                onClick={() => setFreq(fq.id)}
+                className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                  freq === fq.id ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent border-border"
+                }`}
+              >
+                {fq.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {barsLoading && bars == null ? (
+          <div className="animate-pulse h-[420px] bg-muted rounded" />
+        ) : bars && bars.length > 1 ? (
+          <KLineChart
+            data={bars.map((b) => ({
+              date: b.trade_date, open: b.open, high: b.high, low: b.low, close: b.close,
+              volume: b.volume ?? undefined,
+            }))}
+            height={420}
+          />
         ) : <div className="text-xs text-muted-foreground py-12 text-center">暂无行情</div>}
       </div>
 
