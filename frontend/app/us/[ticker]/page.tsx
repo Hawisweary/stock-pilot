@@ -9,6 +9,8 @@ type Freq = "D" | "W" | "M" | "Y";
 const FREQS: { id: Freq; label: string }[] = [
   { id: "D", label: "日K" }, { id: "W", label: "周K" }, { id: "M", label: "月K" }, { id: "Y", label: "年K" },
 ];
+// 初始可视窗口(近端优先):日K≈半年 / 周K≈2.5年 / 月K≈8年 / 年K全部;更早可拖动缩放
+const INIT_BARS: Record<Freq, number | undefined> = { D: 130, W: 130, M: 96, Y: undefined };
 
 type Quote = { trade_date: string; close: number | null; volume: number | null };
 type Detail = {
@@ -217,6 +219,7 @@ export default function UsDetailPage() {
               volume: b.volume ?? undefined,
             }))}
             height={420}
+            initialVisibleBars={INIT_BARS[freq]}
           />
         ) : <div className="text-xs text-muted-foreground py-12 text-center">暂无行情</div>}
       </div>

@@ -26,6 +26,8 @@ interface Props {
   macdData?: unknown;
   height?: number;
   minuteBars?: boolean;
+  /** 初始只显示最近 N 根(近端优先),更早的可拖动/缩放回溯；不传则铺满全部 */
+  initialVisibleBars?: number;
 }
 
 function parseChartTime(date: string, minuteBars?: boolean): string | number {
@@ -216,7 +218,8 @@ function useCombinedChart(
   volumePaneHeight: number,
   indicatorPaneHeight: number,
   showIndicator: boolean,
-  minuteBars?: boolean,
+  minuteBars: boolean,
+  initialVisibleBars?: number,
 ) {
   useEffect(() => {
     const el = containerRef.current;
@@ -224,6 +227,7 @@ function useCombinedChart(
 
     const chart = createChart(el, {
       height,
+      autoSize: true,  // 用 ResizeObserver 自适应容器宽,规避挂载时容器宽为0的竞态
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
         textColor: "#6b7280",
@@ -364,12 +368,31 @@ function useCombinedChart(
       }
     }
 
-    chart.timeScale().fitContent();
-    return () => chart.remove();
-  }, [candles, technical, indicator, height, klinePaneHeight, volumePaneHeight, indicatorPaneHeight, showIndicator, minuteBars]);
+    // 近端优先:只把最近 N 根铺进初始视窗(数据仍全量,可自由缩放回溯)。
+    // 用 rAF 延到 autoSize 的首次 resize 落定后再设,否则会被 0→满宽的 resize 重置成全量。
+    let disposed = false;
+    const applyRange = () => {
+      if (disposed) return;
+      if (initialVisibleBars && candles.length > initialVisibleBars) {
+        chart.timeScale().setVisibleLogicalRange({
+          from: candles.length - initialVisibleBars - 0.5,
+          to: candles.length - 0.5,
+        });
+      } else {
+        chart.timeScale().fitContent();
+      }
+    };
+    applyRange();
+    const raf = requestAnimationFrame(applyRange);
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(raf);
+      chart.remove();
+    };
+  }, [candles, technical, indicator, height, klinePaneHeight, volumePaneHeight, indicatorPaneHeight, showIndicator, minuteBars, initialVisibleBars]);
 }
 
-export function KLineChart({ data, height = 400, minuteBars = false }: Props) {
+export function KLineChart({ data, height = 400, minuteBars = false, initialVisibleBars }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = useState<IndicatorId>("macd");
   const indicatorHeight = 140;
@@ -407,6 +430,7 @@ export function KLineChart({ data, height = 400, minuteBars = false }: Props) {
     indicatorHeight,
     hasInd,
     minuteBars,
+    initialVisibleBars,
   );
 
   return (
