@@ -28,6 +28,8 @@ interface Props {
   minuteBars?: boolean;
   /** 初始只显示最近 N 根(近端优先),更早的可拖动/缩放回溯；不传则铺满全部 */
   initialVisibleBars?: number;
+  /** 绿涨红跌(美股惯例);默认 false = A股红涨绿跌 */
+  greenUp?: boolean;
 }
 
 function parseChartTime(date: string, minuteBars?: boolean): string | number {
@@ -219,7 +221,8 @@ function useCombinedChart(
   indicatorPaneHeight: number,
   showIndicator: boolean,
   minuteBars: boolean,
-  initialVisibleBars?: number,
+  initialVisibleBars: number | undefined,
+  greenUp: boolean,
 ) {
   useEffect(() => {
     const el = containerRef.current;
@@ -243,9 +246,13 @@ function useCombinedChart(
       crosshair: { mode: 0 },
     });
 
+    const upC = greenUp ? "#22c55e" : "#ef4444";
+    const downC = greenUp ? "#ef4444" : "#22c55e";
+    const upLight = greenUp ? "#86efac" : "#fca5a5";
+    const downLight = greenUp ? "#fca5a5" : "#86efac";
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#ef4444", downColor: "#22c55e", borderUpColor: "#ef4444",
-      borderDownColor: "#22c55e", wickUpColor: "#ef4444", wickDownColor: "#22c55e",
+      upColor: upC, downColor: downC, borderUpColor: upC,
+      borderDownColor: downC, wickUpColor: upC, wickDownColor: downC,
       ...SERIES_NO_PRICE_LINE,
     });
     candleSeries.setData(candles as any);
@@ -285,7 +292,7 @@ function useCombinedChart(
         .map((c) => ({
           time: c.time,
           value: c.volume as number,
-          color: c.close >= c.open ? "#fca5a5" : "#86efac",
+          color: c.close >= c.open ? upLight : downLight,
         }));
       volSeries.setData(volData as any);
     }
@@ -389,10 +396,10 @@ function useCombinedChart(
       cancelAnimationFrame(raf);
       chart.remove();
     };
-  }, [candles, technical, indicator, height, klinePaneHeight, volumePaneHeight, indicatorPaneHeight, showIndicator, minuteBars, initialVisibleBars]);
+  }, [candles, technical, indicator, height, klinePaneHeight, volumePaneHeight, indicatorPaneHeight, showIndicator, minuteBars, initialVisibleBars, greenUp]);
 }
 
-export function KLineChart({ data, height = 400, minuteBars = false, initialVisibleBars }: Props) {
+export function KLineChart({ data, height = 400, minuteBars = false, initialVisibleBars, greenUp = false }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = useState<IndicatorId>("macd");
   const indicatorHeight = 140;
@@ -431,6 +438,7 @@ export function KLineChart({ data, height = 400, minuteBars = false, initialVisi
     hasInd,
     minuteBars,
     initialVisibleBars,
+    greenUp,
   );
 
   return (

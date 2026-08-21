@@ -220,6 +220,7 @@ export default function UsDetailPage() {
             }))}
             height={420}
             initialVisibleBars={INIT_BARS[freq]}
+            greenUp
           />
         ) : <div className="text-xs text-muted-foreground py-12 text-center">暂无行情</div>}
       </div>
