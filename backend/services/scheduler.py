@@ -534,6 +534,9 @@ def run_daily_tasks():
             # 美股(独立库 us.db,不阻塞主站):池+名+近5日行情全量刷新(所有股拿到当天+
             # 顺带补此前拉不到的)。温和节奏规避 yfinance 限流;限流则当轮部分刷、次日再续。
             ("us_sync.py", "美股", ["--quotes-period", "5d"], 1800),
+            # 美股 ETF 行情(独立库,精选111只):ETF 不在 us_stocks,不被上面美股任务覆盖,
+            # 须单独日刷。profile(持仓/费率)变动慢,放 weekly。
+            ("us_etf_sync.py", "美股ETF", ["--quotes-only"], 600),
         ]:
             try:
                 _dlog(_fh, f"▶ ②{label}")

@@ -58,14 +58,10 @@ def _ensure(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def main() -> None:
-    conn = sqlite3.connect(config.US_DB_PATH, timeout=60)
-    conn.execute("PRAGMA busy_timeout=60000")
-    conn.execute("PRAGMA journal_mode=WAL")
-    _ensure(conn)
-    tickers = sorted(set(CURATED))
+def sync_profiles(conn: sqlite3.Connection, tickers: list[str]) -> int:
+    """profile(持仓/费率/类别/板块)—— 变动慢,周频刷新即可。"""
     import datetime as dt
-    print(f"[ETF] 精选 {len(tickers)} 只 · 抓取 profile ...")
+    print(f"[ETF] profile: 精选 {len(tickers)} 只 ...")
     ok = 0
     for i, tk in enumerate(tickers, 1):
         p = fetch_us_etf_profile(tk)
@@ -83,18 +79,22 @@ def main() -> None:
                      (tk, json.dumps(p, ensure_ascii=False), dt.datetime.now().isoformat()))
         ok += 1
         if i % 25 == 0:
-            conn.commit(); print(f"   {i}/{len(tickers)} ...")
+            conn.commit()
         time.sleep(0.3)
     conn.commit()
     print(f"[ETF] profile 完成 {ok}/{len(tickers)}")
+    return ok
 
-    print("[ETF] 抓行情(2y, 批量)...")
+
+def sync_quotes(conn: sqlite3.Connection, tickers: list[str], period: str = "5d") -> int:
+    """行情 —— 日频(默认近5日增量刷新;首建可传 2y)。写共享 us_daily_quotes。"""
+    print(f"[ETF] 行情({period}, 批量)...")
     total = 0
     for i in range(0, len(tickers), 60):
         batch = tickers[i:i + 60]
-        rows = fetch_us_quotes_bulk(batch, period="2y")
+        rows = fetch_us_quotes_bulk(batch, period=period)
         if not rows:
-            time.sleep(6); rows = fetch_us_quotes_bulk(batch, period="2y")
+            time.sleep(6); rows = fetch_us_quotes_bulk(batch, period=period)
         if rows:
             conn.executemany(
                 """INSERT OR REPLACE INTO us_daily_quotes
@@ -104,6 +104,28 @@ def main() -> None:
             conn.commit(); total += len(rows)
         time.sleep(1.5)
     print(f"[ETF] 行情写入 {total} 行")
+    return total
+
+
+def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--quotes-only", action="store_true", help="只刷行情(日频)")
+    ap.add_argument("--profiles-only", action="store_true", help="只刷 profile(周频)")
+    ap.add_argument("--quotes-period", default="5d", help="行情周期(首建可传 2y/max)")
+    args = ap.parse_args()
+
+    conn = sqlite3.connect(config.US_DB_PATH, timeout=60)
+    conn.execute("PRAGMA busy_timeout=60000")
+    conn.execute("PRAGMA journal_mode=WAL")
+    _ensure(conn)
+    tickers = sorted(set(CURATED))
+    do_prof = not args.quotes_only
+    do_quotes = not args.profiles_only
+    if do_prof:
+        sync_profiles(conn, tickers)
+    if do_quotes:
+        sync_quotes(conn, tickers, period=args.quotes_period)
     try:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     except sqlite3.OperationalError:

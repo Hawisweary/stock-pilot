@@ -62,8 +62,9 @@ def main() -> int:
         r = sync_v5_nightly_fetch()
         summary = f"ok={r.get('ok')} coverage={r.get('news_event_coverage')}"
 
-        # 日频 Tushare 数据：L2 资金流明细 + 沪深股通十大成交
+        # 日频 Tushare 数据：新股发现 + L2 资金流明细 + 沪深股通十大成交
         for script_name, label, extra_args in [
+            ("tushare_sync_new_shares.py", "new_shares", ["--days", "30"]),
             ("tushare_sync_moneyflow_detail.py", "moneyflow", ["--days", "10"]),
             ("tushare_sync_hsgt_top10.py", "hsgt_top10", ["--days", "10"]),
         ]:
@@ -84,6 +85,8 @@ def main() -> int:
         for script_name, label, extra_args in [
             ("tushare_sync_earnings_alerts.py", "earnings_alerts", ["--years", "1"]),
             ("tushare_sync_disclosure_dates.py", "disclosure_dates", []),
+            # 美股 ETF profile(持仓/费率/类别/板块)—— 变动慢,周频刷新
+            ("us_etf_sync.py", "us_etf_profile", ["--profiles-only"]),
         ]:
             try:
                 last = _run_script_subprocess(script_name, extra_args, timeout_sec=1800)
