@@ -91,10 +91,11 @@ def fetch_us_quotes_bulk(tickers: list[str], period: str = "5d") -> list[dict[st
     if df is None or df.empty:
         return []
     rows = []
-    single = len(tickers) == 1
+    # yfinance 单只也可能返回 MultiIndex 列(group_by=ticker),按列层数判断而非个数
+    multi = getattr(df.columns, "nlevels", 1) > 1
     for tk in tickers:
         try:
-            sub = df if single else df[tk]
+            sub = df[tk] if multi else df
         except (KeyError, TypeError):
             continue
         if sub is None or sub.empty:
