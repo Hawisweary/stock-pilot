@@ -46,6 +46,7 @@ type Detail = {
     } | null;
   } | null;
   description?: string | null;
+  cn_intro?: { what?: string; highlights?: string; financials?: string; valuation?: string; risk?: string } | null;
   cached_at?: string | null;
   error?: string;
 };
@@ -433,10 +434,32 @@ export default function UsDetailPage() {
         ) : <div className="text-xs text-muted-foreground py-12 text-center">暂无行情</div>}
       </div>
 
-      {d.description && (
+      {(d.cn_intro || d.description) && (
         <div className="rounded-xl border bg-card p-4">
-          <div className="text-sm font-semibold mb-1.5">公司简介</div>
-          <p className="text-xs text-muted-foreground leading-relaxed">{d.description}</p>
+          <div className="text-sm font-semibold mb-2">公司简介</div>
+          {d.cn_intro ? (
+            <div className="space-y-2">
+              {([
+                ["主营业务", d.cn_intro.what], ["核心看点", d.cn_intro.highlights],
+                ["财务特征", d.cn_intro.financials], ["估值评级", d.cn_intro.valuation],
+                ["风险提示", d.cn_intro.risk],
+              ] as [string, string | undefined][]).filter(([, v]) => v).map(([k, v]) => (
+                <div key={k} className="flex gap-2 text-xs">
+                  <span className="shrink-0 w-16 font-medium text-muted-foreground">{k}</span>
+                  <span className="leading-relaxed" style={{ color: k === "风险提示" ? US_DOWN : undefined }}>{v}</span>
+                </div>
+              ))}
+              {d.description && (
+                <details className="mt-2">
+                  <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground">英文原文</summary>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">{d.description}</p>
+                </details>
+              )}
+              <div className="text-[10px] text-muted-foreground/70 pt-1">AI 生成,仅供参考,不构成投资建议</div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground leading-relaxed">{d.description}</p>
+          )}
         </div>
       )}
     </div>

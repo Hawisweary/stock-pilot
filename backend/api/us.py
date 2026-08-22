@@ -206,6 +206,55 @@ def _build_profile(ticker: str) -> dict:
     return data
 
 
+_STOCK_INTRO_SYS = "你是专业的股票分析师。基于给定数据用简洁中文写公司简介。只输出 JSON,不要多余文字。"
+
+
+def _gen_stock_cn_intro(ticker: str, data: dict) -> dict | None:
+    """个股中文简介(DeepSeek,懒加载单只按需)。数据不足或 LLM 不可用则返回 None。"""
+    p = data.get("profile") or {}
+    if p.get("error"):
+        return None
+    desc = data.get("description") or ""
+    if not (p.get("sector") or desc):
+        return None
+    try:
+        from services.llm_client import chat_completion, is_llm_available
+        if not is_llm_available():
+            return None
+    except Exception:
+        return None
+
+    def pc(v, mul=100, suf="%"):
+        return f"{round(v * mul, 1)}{suf}" if isinstance(v, (int, float)) else "—"
+    name = data.get("meta_name") or ticker
+    mc = p.get("market_cap")
+    facts = (
+        f"代码:{ticker} 名称:{name}\n"
+        f"行业:{p.get('sector') or '—'}/{p.get('industry') or '—'}  员工:{p.get('employees') or '—'}\n"
+        f"市值:${round(mc/1e9,1)}B  PE:{p.get('trailing_pe') or '—'} 前瞻PE:{p.get('forward_pe') or '—'} Beta:{p.get('beta') or '—'}\n"
+        if mc else ""
+    ) + (
+        f"ROE:{pc(p.get('roe'))} 利润率:{pc(p.get('profit_margin'))} 营收增长:{pc(p.get('rev_growth'))} 盈利增长:{pc(p.get('eps_growth'))}\n"
+        f"分析师:评级{p.get('recommendation') or '—'} 目标均价${p.get('target_mean') or '—'}({p.get('num_analysts') or 0}位)\n"
+        f"业务描述(英文参考):{desc[:400]}"
+    )
+    prompt = (
+        f"为这只美股写中文简介。数据:\n{facts}\n\n"
+        "输出 JSON,五字段各一句话(每句≤45字,客观、不构成投资建议):\n"
+        '{"what":"主营业务是什么","highlights":"核心看点/竞争地位","financials":"财务特征(盈利/成长/回报)",'
+        '"valuation":"估值与分析师评级概况","risk":"主要风险提示"}'
+    )
+    try:
+        txt = chat_completion(prompt, system_prompt=_STOCK_INTRO_SYS, max_tokens=500,
+                              temperature=0.4, json_mode=True, max_retries=1)
+        intro = json.loads(txt)
+        if isinstance(intro, dict) and intro.get("what"):
+            return {k: intro.get(k) for k in ("what", "highlights", "financials", "valuation", "risk")}
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 _profile_locks: dict[str, threading.Lock] = {}
 _profile_locks_guard = threading.Lock()
 
@@ -267,6 +316,14 @@ def _get_us_profile(ticker: str, ttl_hours: float = 20.0) -> dict:
                 return d
             except (TypeError, ValueError):
                 pass
+        # 中文简介:保留旧的(不被 profile 刷新抹掉);缺失则懒生成一次
+        prev_intro = None
+        if cached:
+            try:
+                prev_intro = json.loads(cached).get("cn_intro")
+            except (TypeError, ValueError):
+                pass
+        data["cn_intro"] = prev_intro or _gen_stock_cn_intro(ticker, data)
         try:
             conn = _rw_conn()
             try:
@@ -534,6 +591,7 @@ def us_detail(ticker: str):
     result["accuracy"] = cached.get("accuracy")
     result["fundamentals"] = cached.get("fundamentals") or {}
     result["description"] = cached.get("description")
+    result["cn_intro"] = cached.get("cn_intro")
     result["cached_at"] = cached.get("_cached_at")
     if not result["name"]:
         result["name"] = cached.get("meta_name")
