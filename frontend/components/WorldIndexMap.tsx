@@ -82,13 +82,13 @@ export function WorldIndexMap({ items, onSelect }: { items: Item[]; onSelect: (i
         <button onClick={() => zoomAt(W / 2, H / 2, 1 / 1.4)} className="w-7 h-7 rounded-md border bg-card hover:bg-accent flex items-center justify-center"><Minus className="h-3.5 w-3.5" /></button>
         <button onClick={() => setView({ k: 1, tx: 0, ty: 0 })} className="w-7 h-7 rounded-md border bg-card hover:bg-accent flex items-center justify-center"><Maximize2 className="h-3.5 w-3.5" /></button>
       </div>
-      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full select-none"
-        style={{ maxHeight: 480, cursor: drag.current ? "grabbing" : "grab" }}
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} className="w-full select-none rounded-lg"
+        style={{ maxHeight: 560, cursor: drag.current ? "grabbing" : "grab", background: "var(--accent)" }}
         onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}>
         <g transform={`translate(${tx} ${ty}) scale(${k})`}>
           {grat}
           {WORLD_PATHS.map((d, i) => (
-            <path key={i} d={d} fill="var(--muted)" opacity={0.5} stroke="var(--border)" strokeWidth={0.4 / k} />
+            <path key={i} d={d} fill="var(--muted-foreground)" opacity={0.55} stroke="var(--card)" strokeWidth={0.5 / k} />
           ))}
           {items.map((it) => {
             const c = COORDS[it.ticker];
