@@ -418,8 +418,12 @@ async def us_list(
     except sqlite3.OperationalError:
         return {"as_of": None, "count": 0, "stocks": [], "error": "美股库未就绪(先跑 us_sync)"}
     try:
-        latest_row = conn.execute("SELECT MAX(trade_date) FROM us_daily_quotes").fetchone()
-        latest = latest_row[0] if latest_row else None
+        # 最新交易日须按「个股池」算:共享表里 ETF/加密/外汇(周末交易)会顶高全表 MAX,
+        # 导致按全表最晚日期 JOIN 个股为空。
+        latest = conn.execute(
+            "SELECT MAX(q.trade_date) FROM us_daily_quotes q "
+            "JOIN us_stocks s ON s.ticker=q.ticker WHERE s.is_active=1"
+        ).fetchone()[0]
         sort_col = _SORT.get(sort, "q.close*q.volume")
 
         where = ["s.is_active=1", "q.trade_date=?"]

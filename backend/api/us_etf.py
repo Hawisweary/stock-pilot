@@ -36,7 +36,11 @@ async def etf_list(
     except sqlite3.OperationalError:
         return {"as_of": None, "count": 0, "etfs": [], "error": "ETF 库未就绪(先跑 us_etf_sync)"}
     try:
-        latest = conn.execute("SELECT MAX(trade_date) FROM us_daily_quotes").fetchone()[0]
+        # 最新交易日按「ETF 池」算(共享表里加密/外汇周末交易会顶高全表 MAX)
+        latest = conn.execute(
+            "SELECT MAX(q.trade_date) FROM us_daily_quotes q "
+            "JOIN us_etfs e ON e.ticker=q.ticker WHERE e.is_active=1"
+        ).fetchone()[0]
         sort_col = _SORT.get(sort, "e.aum")
         where = ["e.is_active=1"]
         params: list = [latest]
