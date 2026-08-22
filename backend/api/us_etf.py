@@ -70,6 +70,42 @@ async def etf_list(
         conn.close()
 
 
+_ETF_INTRO_SYS = "你是专业的 ETF 投资顾问。基于给定数据用简洁中文写投研简介。只输出 JSON,不要多余文字。"
+
+
+def _gen_etf_cn_intro(ticker: str, p: dict) -> dict | None:
+    """ETF 中文简介(DeepSeek,懒加载单只按需)。数据不足或 LLM 不可用则 None。"""
+    if not (p.get("category") or p.get("overview") or p.get("holdings")):
+        return None
+    try:
+        from services.llm_client import chat_completion, is_llm_available
+        if not is_llm_available():
+            return None
+    except Exception:
+        return None
+    aum = p.get("aum")
+    alloc = " ".join(f"{k}:{round(v*100)}%" for k, v in (p.get("asset_classes") or {}).items() if v and v > 0.005) or "—"
+    hs = p.get("holdings") or []
+    hold = " ".join(f"{h['symbol']}({round((h.get('weight') or 0)*100,1)}%)" for h in hs[:10]) or "无(债券/大宗类)"
+    secs = sorted(p.get("sectors") or [], key=lambda s: -(s.get("weight") or 0))[:5]
+    sec = " ".join(f"{s['sector']}:{round((s.get('weight') or 0)*100)}%" for s in secs) or "—"
+    prompt = (
+        f"为这只美股 ETF 写中文简介。数据:\n代码:{ticker} 名称:{p.get('name') or ticker}\n"
+        f"类别:{p.get('category') or '—'} 发行商:{p.get('fund_family') or '—'} 规模:{f'${round(aum/1e9,1)}B' if aum else '—'}\n"
+        f"资产配置:{alloc}\n前十持仓:{hold}\n板块权重:{sec}\n英文说明(参考):{(p.get('overview') or '')[:400]}\n\n"
+        "输出 JSON,五字段各一句话(每句≤45字,客观、不构成投资建议):\n"
+        '{"what":"这只ETF是什么","tracks":"跟踪的指数或策略","holdings":"持仓特征","fit":"适合什么投资者","risk":"主要风险"}'
+    )
+    try:
+        intro = json.loads(chat_completion(prompt, system_prompt=_ETF_INTRO_SYS, max_tokens=500,
+                                           temperature=0.4, json_mode=True, max_retries=1))
+        if isinstance(intro, dict) and intro.get("what"):
+            return {k: intro.get(k) for k in ("what", "tracks", "holdings", "fit", "risk")}
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def _get_etf_profile(ticker: str, ttl_hours: float = 20.0) -> dict:
     """ETF profile 缓存优先;冷门/过期则现抓并回写。"""
     try:
@@ -100,6 +136,8 @@ def _get_etf_profile(ticker: str, ttl_hours: float = 20.0) -> dict:
                     p["cn_intro"] = prev["cn_intro"]
             except (TypeError, ValueError):
                 pass
+        if not p.get("cn_intro"):  # 缺失则懒生成一次(打开时)
+            p["cn_intro"] = _gen_etf_cn_intro(ticker, p)
         conn.execute("INSERT OR REPLACE INTO us_etf_profile(ticker,data,updated_at) VALUES(?,?,?)",
                      (ticker, json.dumps(p, ensure_ascii=False), dt.datetime.now().isoformat()))
         conn.commit()
