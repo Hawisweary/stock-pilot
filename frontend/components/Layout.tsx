@@ -33,6 +33,7 @@ const NAV_GROUPS: { title?: string; items: NavItem[] }[] = [
       { href: "/stocks", label: "股票列表", icon: TrendingUp },
       { href: "/etf", label: "ETF 列表", icon: Coins },
       { href: "/us", label: "美股", icon: DollarSign },
+      { href: "/us-etf", label: "美股 ETF", icon: Coins },
       { href: "/screener", label: "选股筛选", icon: Filter },
       { href: "/calendar", label: "财报日历", icon: CalendarDays },
       { href: "/heatmap", label: "V5 热力图", icon: Grid3X3 },

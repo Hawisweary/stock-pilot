@@ -273,6 +273,54 @@ def fetch_us_analyst_detail(ticker: str) -> dict[str, Any]:
     return out
 
 
+def fetch_us_etf_profile(ticker: str) -> dict[str, Any] | None:
+    """ETF 富字段(yfinance):类别/家族/规模/费率/回报 + 资产配置/板块权重/前十持仓。"""
+    import warnings
+
+    import yfinance as yf
+
+    warnings.filterwarnings("ignore")
+    try:
+        t = yf.Ticker(ticker)
+        info = t.info or {}
+    except Exception:
+        return None
+    exp = _f(info.get("netExpenseRatio"))  # 百分数,如 0.18
+    prof: dict[str, Any] = {
+        "name": info.get("longName") or info.get("shortName"),
+        "category": info.get("category"),
+        "fund_family": info.get("fundFamily"),
+        "aum": _f(info.get("totalAssets")),
+        "nav": _f(info.get("navPrice")),
+        "yield": _f(info.get("yield")),
+        "ytd_return": _f(info.get("ytdReturn")),
+        "three_year_return": _f(info.get("threeYearAverageReturn")),
+        "beta3": _f(info.get("beta3Year")),
+        "expense_ratio": exp,
+        "asset_classes": None, "sectors": [], "holdings": [], "overview": None,
+    }
+    try:
+        fd = t.funds_data
+        if fd.asset_classes:
+            prof["asset_classes"] = {k: _f(v) for k, v in dict(fd.asset_classes).items()}
+        if fd.sector_weightings:
+            prof["sectors"] = [{"sector": k, "weight": _f(v)}
+                               for k, v in fd.sector_weightings.items() if _f(v)]
+        h = fd.top_holdings
+        if h is not None and not h.empty:
+            prof["holdings"] = [{"symbol": str(idx), "name": str(r.get("Name", "") or ""),
+                                 "weight": _f(r.get("Holding Percent"))}
+                                for idx, r in h.iterrows()]
+        if prof["expense_ratio"] is None:
+            er = fd.fund_operations
+            v = er.loc["Annual Report Expense Ratio", ticker] if ticker in er.columns else None
+            prof["expense_ratio"] = _f(v) * 100 if _f(v) is not None else None
+        prof["overview"] = (fd.description or "")[:600] or None
+    except Exception:  # noqa: BLE001
+        pass
+    return prof
+
+
 def fetch_us_target_history(ticker: str) -> list[dict[str, Any]]:
     """全量历史评级/目标价(带日期),供"分析师准确度"回测用。
 
