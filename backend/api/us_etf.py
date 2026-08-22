@@ -93,6 +93,13 @@ def _get_etf_profile(ticker: str, ttl_hours: float = 20.0) -> dict:
         p = fetch_us_etf_profile(ticker)
         if not p:
             return json.loads(row["data"]) if row else {}
+        if row:  # 保留已生成的中文简介
+            try:
+                prev = json.loads(row["data"])
+                if prev.get("cn_intro"):
+                    p["cn_intro"] = prev["cn_intro"]
+            except (TypeError, ValueError):
+                pass
         conn.execute("INSERT OR REPLACE INTO us_etf_profile(ticker,data,updated_at) VALUES(?,?,?)",
                      (ticker, json.dumps(p, ensure_ascii=False), dt.datetime.now().isoformat()))
         conn.commit()

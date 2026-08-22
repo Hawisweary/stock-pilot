@@ -87,6 +87,8 @@ def main() -> int:
             ("tushare_sync_disclosure_dates.py", "disclosure_dates", []),
             # 美股 ETF profile(持仓/费率/类别/板块)—— 变动慢,周频刷新
             ("us_etf_sync.py", "us_etf_profile", ["--profiles-only"]),
+            # ETF 中文简介(DeepSeek)—— 仅补缺, 给新增 ETF 生成
+            ("us_etf_intros.py", "us_etf_intros", []),
         ]:
             try:
                 last = _run_script_subprocess(script_name, extra_args, timeout_sec=1800)

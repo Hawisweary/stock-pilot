@@ -21,6 +21,7 @@ type Detail = {
     sectors?: { sector: string; weight: number }[];
     holdings?: { symbol: string; name: string; weight: number }[];
     overview?: string | null;
+    cn_intro?: { what?: string; tracks?: string; holdings?: string; fit?: string; risk?: string } | null;
   };
   error?: string;
 };
@@ -182,10 +183,32 @@ export default function EtfDetailPage() {
         ) : <div className="text-xs text-muted-foreground py-16 text-center">加载中…</div>}
       </div>
 
-      {p.overview && (
+      {(p.cn_intro || p.overview) && (
         <div className="rounded-xl border bg-card p-4">
-          <div className="text-sm font-semibold mb-1.5">简介</div>
-          <p className="text-xs text-muted-foreground leading-relaxed">{p.overview}</p>
+          <div className="text-sm font-semibold mb-2">简介</div>
+          {p.cn_intro ? (
+            <div className="space-y-2">
+              {([
+                ["是什么", p.cn_intro.what], ["跟踪策略", p.cn_intro.tracks],
+                ["持仓特征", p.cn_intro.holdings], ["适合谁", p.cn_intro.fit],
+                ["风险提示", p.cn_intro.risk],
+              ] as [string, string | undefined][]).filter(([, v]) => v).map(([k, v]) => (
+                <div key={k} className="flex gap-2 text-xs">
+                  <span className="shrink-0 w-16 font-medium text-muted-foreground">{k}</span>
+                  <span className={`leading-relaxed ${k === "风险提示" ? "text-[var(--down)]" : ""}`}>{v}</span>
+                </div>
+              ))}
+              {p.overview && (
+                <details className="mt-2">
+                  <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground">英文原文</summary>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">{p.overview}</p>
+                </details>
+              )}
+              <div className="text-[10px] text-muted-foreground/70 pt-1">AI 生成,仅供参考,不构成投资建议</div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground leading-relaxed">{p.overview}</p>
+          )}
         </div>
       )}
     </div>

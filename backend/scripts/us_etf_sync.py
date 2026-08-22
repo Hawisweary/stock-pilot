@@ -67,6 +67,15 @@ def sync_profiles(conn: sqlite3.Connection, tickers: list[str]) -> int:
         p = fetch_us_etf_profile(tk)
         if not p:
             continue
+        # 保留已生成的中文简介(profile 刷新不应抹掉 LLM 产物)
+        old = conn.execute("SELECT data FROM us_etf_profile WHERE ticker=?", (tk,)).fetchone()
+        if old:
+            try:
+                prev = json.loads(old[0])
+                if prev.get("cn_intro"):
+                    p["cn_intro"] = prev["cn_intro"]
+            except (TypeError, ValueError):
+                pass
         conn.execute(
             """INSERT INTO us_etfs (ticker,name,category,fund_family,aum,expense_ratio,is_active,updated_at)
                VALUES (?,?,?,?,?,?,1,datetime('now'))
