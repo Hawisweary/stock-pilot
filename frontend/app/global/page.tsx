@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { X } from "lucide-react";
 import { KLineChart } from "@/components/KLineChart";
+import { WorldIndexMap } from "@/components/WorldIndexMap";
 
 type Item = {
   ticker: string; name: string; last: number | null; is_yield?: boolean;
@@ -53,6 +54,11 @@ export default function GlobalPage() {
           股指 · 汇率 · 大宗 · 美债 · 加密 · 数据 {asOf ?? "—"} · 点标的看K线 · 点表头按周期排序
         </p>
       </div>
+
+      {groups && (() => {
+        const idx = groups.find((g) => g.group === "全球股指");
+        return idx ? <WorldIndexMap items={idx.items} onSelect={setSel} /> : null;
+      })()}
 
       {groups == null ? (
         <div className="animate-pulse h-96 bg-muted rounded" />
