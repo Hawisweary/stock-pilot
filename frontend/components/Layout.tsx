@@ -5,6 +5,7 @@ import Link from "next/link";
 import { LayoutDashboard, BarChart3, Database, TrendingUp, Moon, Sun, Activity, Grid3X3, FlaskConical, Briefcase, Menu, X, Filter, CalendarDays, ShieldCheck, Coins, DollarSign, BookOpen } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { AssistantWidget } from "@/components/AssistantWidget";
 import { useEffect, useState } from "react";
 
 type NavItem = {
@@ -212,6 +213,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       <GlobalSearch />
       <main className="md:ml-56 pt-14 md:pt-0 p-4 md:p-8">{children}</main>
+      <AssistantWidget />
     </div>
   );
 }
