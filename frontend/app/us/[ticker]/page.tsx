@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { KLineChart } from "@/components/KLineChart";
+import { InfoDot } from "@/components/InfoDot";
 
 type Bar = { trade_date: string; open: number; high: number; low: number; close: number; volume: number | null };
 type Freq = "D" | "W" | "M" | "Y";
@@ -133,13 +134,13 @@ export default function UsDetailPage() {
     : acc.direction_pct >= 55 ? "方向一般"
     : "方向参考价值低";
 
-  const Stat = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  const Stat = ({ label, value }: { label: React.ReactNode; value: React.ReactNode }) => (
     <div className="rounded-xl border bg-card p-3">
       <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="text-lg font-bold tabular-nums">{value}</div>
     </div>
   );
-  const Kv = ({ k, v }: { k: string; v: React.ReactNode }) => (
+  const Kv = ({ k, v }: { k: React.ReactNode; v: React.ReactNode }) => (
     <div className="flex justify-between gap-2 border-b border-border/40 py-0.5">
       <span className="text-muted-foreground">{k}</span>
       <span className="font-medium tabular-nums text-right truncate">{v}</span>
@@ -170,10 +171,10 @@ export default function UsDetailPage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label="市值" value={fmtCap(f?.market_cap ?? p?.market_cap)} />
-        <Stat label="PE" value={fmtNum(f?.pe ?? p?.trailing_pe)} />
-        <Stat label="PB" value={fmtNum(f?.pb ?? p?.pb)} />
-        <Stat label="PEG" value={fmtNum(f?.peg)} />
+        <Stat label={<>市值<InfoDot k="market_cap" /></>} value={fmtCap(f?.market_cap ?? p?.market_cap)} />
+        <Stat label={<>PE<InfoDot k="pe" /></>} value={fmtNum(f?.pe ?? p?.trailing_pe)} />
+        <Stat label={<>PB<InfoDot k="pb" /></>} value={fmtNum(f?.pb ?? p?.pb)} />
+        <Stat label={<>PEG<InfoDot k="peg" /></>} value={fmtNum(f?.peg)} />
       </div>
 
       {p && (p.sector || p.target_mean != null) && (
@@ -212,13 +213,13 @@ export default function UsDetailPage() {
             <div className="text-sm font-semibold mb-2">质量 · 成长 · 风险</div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-xs">
               <Kv k="行业" v={p.industry || p.sector || "—"} />
-              <Kv k="ROE" v={pct(p.roe)} />
+              <Kv k={<>ROE<InfoDot k="roe" /></>} v={pct(p.roe)} />
               <Kv k="利润率" v={pct(p.profit_margin)} />
               <Kv k="营收增长" v={pct(p.rev_growth)} />
               <Kv k="盈利增长" v={pct(p.eps_growth)} />
-              <Kv k="前瞻PE" v={fmtNum(p.forward_pe)} />
-              <Kv k="Beta" v={fmtNum(p.beta)} />
-              <Kv k="股息率" v={p.div_yield != null ? `${p.div_yield.toFixed(2)}%` : "—"} />
+              <Kv k={<>前瞻PE<InfoDot k="forward_pe" /></>} v={fmtNum(p.forward_pe)} />
+              <Kv k={<>Beta<InfoDot k="beta" /></>} v={fmtNum(p.beta)} />
+              <Kv k={<>股息率<InfoDot k="div_yield" /></>} v={p.div_yield != null ? `${p.div_yield.toFixed(2)}%` : "—"} />
               <Kv k="EPS" v={p.eps != null ? `$${p.eps.toFixed(2)}` : "—"} />
               <Kv k="员工" v={p.employees != null ? p.employees.toLocaleString() : "—"} />
               <Kv k="52周高" v={p.wk52_high != null ? `$${p.wk52_high.toFixed(0)}` : "—"} />
@@ -306,7 +307,7 @@ export default function UsDetailPage() {
         <div className="rounded-xl border bg-card p-4 space-y-3">
           <div className="flex items-baseline justify-between flex-wrap gap-2">
             <div className="text-sm font-semibold">
-              分析师准确度
+              分析师准确度<InfoDot k="analyst_accuracy" />
               {biasVerdict && (
                 <span className="ml-2 text-[11px] font-bold px-2 py-0.5 rounded"
                   style={{ backgroundColor: biasVerdict.color, color: "#fff" }}>
@@ -392,7 +393,7 @@ export default function UsDetailPage() {
 
       <div className="rounded-xl border bg-card p-4">
         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-          <div className="text-sm font-semibold">K线 · 蜡烛图 + 指标</div>
+          <div className="text-sm font-semibold">K线 · 蜡烛图 + 指标<InfoDot k="adjust" /></div>
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setAdjust((v) => !v)}
