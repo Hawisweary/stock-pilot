@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { LayoutDashboard, BarChart3, Database, TrendingUp, Moon, Sun, Activity, Grid3X3, FlaskConical, Briefcase, Menu, X, Filter, CalendarDays, ShieldCheck, Coins, DollarSign } from "lucide-react";
+import { LayoutDashboard, BarChart3, Database, TrendingUp, Moon, Sun, Activity, Grid3X3, FlaskConical, Briefcase, Menu, X, Filter, CalendarDays, ShieldCheck, Coins, DollarSign, BookOpen } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { useEffect, useState } from "react";
@@ -29,6 +29,7 @@ const NAV_GROUPS: { title?: string; items: NavItem[] }[] = [
   {
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/learn", label: "新手教程", icon: BookOpen },
       { href: "/market", label: "市场行情", icon: Activity },
       { href: "/stocks", label: "股票列表", icon: TrendingUp },
       { href: "/etf", label: "ETF 列表", icon: Coins },
