@@ -177,7 +177,8 @@ def _compute_accuracy(ticker: str, horizon_days: int = 365, min_samples: int = 2
 def _build_profile(ticker: str) -> dict:
     """现抓整页可缓存数据:profile(行业/分析师目标价/质量)+ 分析师详情 + Tiingo基本面 + 简介。"""
     from services.us_market_adapter import (
-        fetch_us_analyst_detail, fetch_us_fundamentals_daily, fetch_us_meta, fetch_us_profile,
+        fetch_us_analyst_detail, fetch_us_financials, fetch_us_fundamentals_daily,
+        fetch_us_meta, fetch_us_profile,
     )
     data: dict = {}
     try:
@@ -192,6 +193,10 @@ def _build_profile(ticker: str) -> dict:
         data["accuracy"] = _compute_accuracy(ticker)  # None 表示样本不足/无覆盖
     except Exception:  # noqa: BLE001
         data["accuracy"] = None
+    try:
+        data["financials"] = fetch_us_financials(ticker)  # 免费财报:营收/净利/EPS + 超预期
+    except Exception:  # noqa: BLE001
+        data["financials"] = None
     try:
         data["fundamentals"] = fetch_us_fundamentals_daily(ticker) or {}
     except Exception as ex:  # noqa: BLE001
@@ -591,6 +596,7 @@ def us_detail(ticker: str):
     result["analyst"] = cached.get("analyst") or {}
     result["accuracy"] = cached.get("accuracy")
     result["fundamentals"] = cached.get("fundamentals") or {}
+    result["financials"] = cached.get("financials")
     result["description"] = cached.get("description")
     result["cn_intro"] = cached.get("cn_intro")
     result["cached_at"] = cached.get("_cached_at")

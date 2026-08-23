@@ -46,6 +46,11 @@ type Detail = {
       spread_pct?: number;
     } | null;
   } | null;
+  financials?: {
+    annual?: { period: string; revenue?: number | null; net_income?: number | null; eps?: number | null }[];
+    earnings?: { date: string; eps_est?: number | null; eps_actual?: number | null; surprise_pct?: number | null }[];
+    next_earnings?: string | null;
+  } | null;
   description?: string | null;
   cn_intro?: { what?: string; highlights?: string; financials?: string; valuation?: string; risk?: string } | null;
   cached_at?: string | null;
@@ -388,6 +393,62 @@ export default function UsDetailPage() {
             方法:取发布满 {Math.round(acc.horizon_days / 30)} 个月的历史目标价/评级,与复权后真实价对照(消除拆股)。
             目标价看<b>高估/低估</b>,评级看<b>方向对不对</b>;牛股里"上涨概率"会普遍虚高,真正的信号是<b>多空价差</b>(看涨组比看空组多涨多少)。逐股口径,不可跨股比较。
           </p>
+        </div>
+      )}
+
+      {d.financials && ((d.financials.earnings?.length ?? 0) > 0 || (d.financials.annual?.length ?? 0) > 0) && (
+        <div className="rounded-xl border bg-card p-4 space-y-3">
+          <div className="flex items-baseline justify-between flex-wrap gap-2">
+            <div className="text-sm font-semibold">财务与财报</div>
+            {d.financials.next_earnings && (
+              <div className="text-[11px] text-muted-foreground">下次财报日 <span className="font-medium text-foreground">{d.financials.next_earnings}</span></div>
+            )}
+          </div>
+
+          {(d.financials.annual?.length ?? 0) > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {d.financials.annual!.slice(-4).map((a) => (
+                <div key={a.period} className="rounded-lg border bg-background p-2">
+                  <div className="text-[11px] text-muted-foreground">{a.period} 财年</div>
+                  <div className="text-sm font-bold tabular-nums">{fmtCap(a.revenue)}</div>
+                  <div className="text-[10px] text-muted-foreground">营收 · 净利 {fmtCap(a.net_income)}</div>
+                  <div className="text-[10px] text-muted-foreground">EPS {a.eps != null ? `$${a.eps.toFixed(2)}` : "—"}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {(d.financials.earnings?.length ?? 0) > 0 && (
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">财报超预期(EPS 实际 vs 预期)</div>
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40 text-[11px] text-muted-foreground">
+                    <tr>
+                      <th className="px-2.5 py-1.5 text-left font-medium">财报日</th>
+                      <th className="px-2.5 py-1.5 text-right font-medium">预期 EPS</th>
+                      <th className="px-2.5 py-1.5 text-right font-medium">实际 EPS</th>
+                      <th className="px-2.5 py-1.5 text-right font-medium">超预期</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.financials.earnings!.map((e) => (
+                      <tr key={e.date} className="border-t border-border/60">
+                        <td className="px-2.5 py-1.5 tabular-nums text-muted-foreground">{e.date}</td>
+                        <td className="px-2.5 py-1.5 text-right tabular-nums">{e.eps_est != null ? `$${e.eps_est.toFixed(2)}` : "—"}</td>
+                        <td className="px-2.5 py-1.5 text-right tabular-nums font-medium">{e.eps_actual != null ? `$${e.eps_actual.toFixed(2)}` : "—"}</td>
+                        <td className="px-2.5 py-1.5 text-right tabular-nums font-medium"
+                          style={{ color: e.surprise_pct == null ? "var(--muted-foreground)" : e.surprise_pct >= 0 ? US_UP : US_DOWN }}>
+                          {e.surprise_pct != null ? `${e.surprise_pct > 0 ? "+" : ""}${e.surprise_pct.toFixed(1)}%` : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="text-[10px] text-muted-foreground/70 mt-1">超预期为正=实际盈利超过分析师预期(beat),连续 beat 常反映经营强于预期。数据 yfinance,仅供参考。</div>
+            </div>
+          )}
         </div>
       )}
 

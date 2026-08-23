@@ -322,6 +322,71 @@ def fetch_us_etf_profile(ticker: str) -> dict[str, Any] | None:
     return prof
 
 
+def fetch_us_financials(ticker: str) -> dict[str, Any]:
+    """yfinance 免费财报:年度营收/净利/EPS 趋势 + 财报超预期(近几期)+ 下次财报日。"""
+    import warnings
+
+    import yfinance as yf
+
+    warnings.filterwarnings("ignore")
+    out: dict[str, Any] = {"annual": [], "earnings": [], "next_earnings": None}
+    try:
+        t = yf.Ticker(ticker)
+    except Exception:
+        return out
+
+    def _row(df, names):
+        for n in names:
+            try:
+                if n in df.index:
+                    return df.loc[n]
+            except Exception:
+                pass
+        return None
+
+    # 年度:营收 / 净利 / EPS(近4年)
+    try:
+        inc = t.income_stmt
+        if inc is not None and not inc.empty:
+            rev = _row(inc, ["Total Revenue", "Operating Revenue"])
+            ni = _row(inc, ["Net Income", "Net Income Common Stockholders"])
+            eps = _row(inc, ["Diluted EPS", "Basic EPS"])
+            cols = list(inc.columns)[:4]
+            rows = []
+            for c in cols:
+                rows.append({
+                    "period": str(c.year) if hasattr(c, "year") else str(c)[:4],
+                    "revenue": _f(rev.get(c)) if rev is not None else None,
+                    "net_income": _f(ni.get(c)) if ni is not None else None,
+                    "eps": _f(eps.get(c)) if eps is not None else None,
+                })
+            out["annual"] = list(reversed(rows))  # 升序
+    except Exception:
+        pass
+
+    # 财报超预期 + 下次财报日
+    try:
+        ed = t.earnings_dates
+        if ed is not None and not ed.empty:
+            ed = ed.sort_index(ascending=False)
+            past, future = [], []
+            for idx, r in ed.iterrows():
+                est = _f(r.get("EPS Estimate"))
+                act = _f(r.get("Reported EPS"))
+                sur = _f(r.get("Surprise(%)"))
+                d = str(idx)[:10]
+                if act is None or act != act:  # 未公布 → 未来
+                    future.append(d)
+                else:
+                    past.append({"date": d, "eps_est": est, "eps_actual": act, "surprise_pct": sur})
+            out["earnings"] = past[:8]
+            if future:
+                out["next_earnings"] = min(future)
+    except Exception:
+        pass
+    return out
+
+
 def fetch_us_target_history(ticker: str) -> list[dict[str, Any]]:
     """全量历史评级/目标价(带日期),供"分析师准确度"回测用。
 
