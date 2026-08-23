@@ -475,39 +475,40 @@ async def us_list(
     except sqlite3.OperationalError:
         return {"as_of": None, "count": 0, "stocks": [], "error": "美股库未就绪(先跑 us_sync)"}
     try:
-        # 最新交易日须按「个股池」算:共享表里 ETF/加密/外汇(周末交易)会顶高全表 MAX,
-        # 导致按全表最晚日期 JOIN 个股为空。
+        # 个股池最新交易日(仅用于表头 as_of 展示)
         latest = conn.execute(
             "SELECT MAX(q.trade_date) FROM us_daily_quotes q "
             "JOIN us_stocks s ON s.ticker=q.ticker WHERE s.is_active=1"
         ).fetchone()[0]
         sort_col = _SORT.get(sort, "q.close*q.volume")
 
-        where = ["s.is_active=1", "q.trade_date=?"]
-        params: list = [latest]
+        # 每只股票取「它自己的」最新行情(rn=1)+ 次新(rn=2 算涨跌)。避免某只
+        # 漏刷一天就从列表消失(此前 INNER JOIN 全局最新日的脆弱点)。
+        where = ["s.is_active=1"]
+        params: list = []
         if q:
             where.append("(s.ticker LIKE ? OR s.name LIKE ?)")
             params += [f"%{q.upper()}%", f"%{q}%"]
         params.append(limit)
 
         rows = conn.execute(
-            f"""SELECT s.ticker, s.name, s.exchange, q.close, q.volume, q.trade_date,
-                       (SELECT close FROM us_daily_quotes p
-                        WHERE p.ticker=s.ticker AND p.trade_date<q.trade_date
-                        ORDER BY p.trade_date DESC LIMIT 1) AS prev_close,
-                       CASE WHEN (SELECT close FROM us_daily_quotes p
-                                  WHERE p.ticker=s.ticker AND p.trade_date<q.trade_date
-                                  ORDER BY p.trade_date DESC LIMIT 1) > 0
-                            THEN round((q.close / (SELECT close FROM us_daily_quotes p
-                                  WHERE p.ticker=s.ticker AND p.trade_date<q.trade_date
-                                  ORDER BY p.trade_date DESC LIMIT 1) - 1) * 100, 2)
+            f"""WITH ranked AS (
+                    SELECT dq.ticker, dq.trade_date, dq.close, dq.volume,
+                           ROW_NUMBER() OVER (PARTITION BY dq.ticker ORDER BY dq.trade_date DESC) rn
+                    FROM us_daily_quotes dq
+                    JOIN us_stocks st ON st.ticker=dq.ticker AND st.is_active=1
+                )
+                SELECT s.ticker, s.name, s.exchange, q.close, q.volume, q.trade_date,
+                       p.close AS prev_close,
+                       CASE WHEN p.close>0 THEN round((q.close / p.close - 1) * 100, 2)
                             ELSE NULL END AS chg
                 FROM us_stocks s
-                JOIN us_daily_quotes q ON q.ticker=s.ticker AND q.trade_date=?
+                JOIN ranked q ON q.ticker=s.ticker AND q.rn=1
+                LEFT JOIN ranked p ON p.ticker=s.ticker AND p.rn=2
                 WHERE {' AND '.join(where)}
                 ORDER BY {sort_col} IS NULL, {sort_col} DESC
                 LIMIT ?""",
-            [latest] + params,
+            params,
         ).fetchall()
         return {"as_of": latest, "count": len(rows), "stocks": [dict(r) for r in rows]}
     finally:

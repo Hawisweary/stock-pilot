@@ -43,23 +43,27 @@ async def etf_list(
         ).fetchone()[0]
         sort_col = _SORT.get(sort, "e.aum")
         where = ["e.is_active=1"]
-        params: list = [latest]
+        params: list = []
         if q:
             where.append("(e.ticker LIKE ? OR e.name LIKE ? OR e.category LIKE ?)")
             params += [f"%{q.upper()}%", f"%{q}%", f"%{q}%"]
         params.append(limit)
+        # 每只 ETF 取它自己的最新行情(rn=1)+次新(rn=2),漏刷一天也不显示空价
         rows = conn.execute(
-            f"""SELECT e.ticker,e.name,e.category,e.fund_family,e.aum,e.expense_ratio,
+            f"""WITH ranked AS (
+                    SELECT dq.ticker, dq.trade_date, dq.close, dq.volume,
+                           ROW_NUMBER() OVER (PARTITION BY dq.ticker ORDER BY dq.trade_date DESC) rn
+                    FROM us_daily_quotes dq
+                    JOIN us_etfs et ON et.ticker=dq.ticker AND et.is_active=1
+                )
+                SELECT e.ticker,e.name,e.category,e.fund_family,e.aum,e.expense_ratio,
                        q.close,q.volume,q.trade_date,
-                       (SELECT close FROM us_daily_quotes p WHERE p.ticker=e.ticker
-                        AND p.trade_date<q.trade_date ORDER BY p.trade_date DESC LIMIT 1) AS prev,
-                       CASE WHEN (SELECT close FROM us_daily_quotes p WHERE p.ticker=e.ticker
-                            AND p.trade_date<q.trade_date ORDER BY p.trade_date DESC LIMIT 1)>0
-                        THEN round((q.close/(SELECT close FROM us_daily_quotes p WHERE p.ticker=e.ticker
-                            AND p.trade_date<q.trade_date ORDER BY p.trade_date DESC LIMIT 1)-1)*100,2)
-                        ELSE NULL END AS chg
+                       p.close AS prev,
+                       CASE WHEN p.close>0 THEN round((q.close/p.close-1)*100,2)
+                            ELSE NULL END AS chg
                 FROM us_etfs e
-                LEFT JOIN us_daily_quotes q ON q.ticker=e.ticker AND q.trade_date=?
+                LEFT JOIN ranked q ON q.ticker=e.ticker AND q.rn=1
+                LEFT JOIN ranked p ON p.ticker=e.ticker AND p.rn=2
                 WHERE {' AND '.join(where)}
                 ORDER BY {sort_col} IS NULL, {sort_col} DESC
                 LIMIT ?""",
