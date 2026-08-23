@@ -6,6 +6,20 @@ import { MessageCircle, X, Send, Sparkles } from "lucide-react";
 type Msg = { role: "user" | "bot"; text: string };
 const SUGGESTIONS = ["什么是市盈率?", "K线怎么看?", "什么是复权?", "选股筛选怎么用?", "定投适合新手吗?"];
 
+const PAGE_NAMES: Record<string, string> = {
+  global: "全球市场", learn: "新手教程", market: "市场行情", screener: "选股筛选",
+  heatmap: "V5热力图", etf: "ETF列表", stocks: "股票列表", calendar: "财报日历", data: "数据中心",
+};
+function pageContext(pathname: string): string {
+  const seg = pathname.split("/").filter(Boolean);
+  if (seg[0] === "us" && seg[1]) return `美股 ${seg[1].toUpperCase()} 的详情页`;
+  if (seg[0] === "us-etf" && seg[1]) return `美股ETF ${seg[1].toUpperCase()} 的详情页`;
+  if ((seg[0] === "stock" || seg[0] === "stocks") && seg[1]) return `A股 ${seg[1]} 的详情页`;
+  if (seg[0] === "us") return "美股列表页";
+  if (seg[0] === "us-etf") return "美股ETF列表页";
+  return PAGE_NAMES[seg[0]] ? `${PAGE_NAMES[seg[0]]}页` : "首页";
+}
+
 export function AssistantWidget() {
   const [open, setOpen] = useState(false);
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -29,7 +43,7 @@ export function AssistantWidget() {
     try {
       const r = await fetch("/api/assistant/ask", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, context: `页面 ${pathname}` }),
+        body: JSON.stringify({ question, context: pageContext(pathname) }),
       });
       const d = await r.json();
       setMsgs((m) => [...m, { role: "bot", text: d.answer || d.error || "抱歉,暂时无法回答。" }]);

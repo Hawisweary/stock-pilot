@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { KLineChart } from "@/components/KLineChart";
+import { InfoDot } from "@/components/InfoDot";
 
 type Bar = { trade_date: string; open: number; high: number; low: number; close: number; volume: number | null };
 type Freq = "D" | "W" | "M" | "Y";
@@ -64,7 +65,7 @@ export default function EtfDetailPage() {
   const chg = last != null && prev ? (last / prev - 1) * 100 : null;
   const ac = p.asset_classes ?? null;
 
-  const Stat = ({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) => (
+  const Stat = ({ label, value, sub }: { label: React.ReactNode; value: React.ReactNode; sub?: string }) => (
     <div className="rounded-xl border bg-card p-3">
       <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="text-lg font-bold tabular-nums">{value}</div>
@@ -96,9 +97,9 @@ export default function EtfDetailPage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Stat label="规模 AUM" value={fmtAum(p.aum)} />
-        <Stat label="费率" value={p.expense_ratio != null ? `${p.expense_ratio}%` : "—"} sub="年化" />
-        <Stat label="股息率" value={pctOf(p.yield)} />
+        <Stat label={<>规模 AUM<InfoDot k="aum" /></>} value={fmtAum(p.aum)} />
+        <Stat label={<>费率<InfoDot k="expense_ratio" /></>} value={p.expense_ratio != null ? `${p.expense_ratio}%` : "—"} sub="年化" />
+        <Stat label={<>股息率<InfoDot k="div_yield" /></>} value={pctOf(p.yield)} />
         <Stat label="今年回报" value={p.ytd_return != null ? `${p.ytd_return > 0 ? "+" : ""}${p.ytd_return.toFixed(1)}%` : "—"} />
         <Stat label="3年年化" value={pctOf(p.three_year_return)} sub={`β ${p.beta3?.toFixed(2) ?? "—"}`} />
       </div>

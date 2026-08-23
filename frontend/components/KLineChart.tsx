@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { InfoDot } from "@/components/InfoDot";
 import {
   createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries,
 } from "lightweight-charts";
@@ -465,6 +466,7 @@ export function KLineChart({ data, height = 400, minuteBars = false, initialVisi
             </button>
           );
         })}
+        <InfoDot k={indicator} />
       </div>
 
       <div ref={chartRef} />

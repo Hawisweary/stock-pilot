@@ -4,7 +4,8 @@ export type Block =
   | { t: "p"; text: string }
   | { t: "ul"; items: string[] }
   | { t: "tip"; text: string }
-  | { t: "table"; head: string[]; rows: string[][] };
+  | { t: "table"; head: string[]; rows: string[][] }
+  | { t: "fig"; kind: "kline" | "adjust" };
 
 export type Section = { id: string; title: string; blocks: Block[] };
 export type Chapter = { id: string; title: string; icon: string; sections: Section[]; stub?: boolean };
@@ -73,6 +74,7 @@ export const LEARN: Chapter[] = [
         id: "kline", title: "K线怎么读",
         blocks: [
           { t: "p", text: "**K线(蜡烛图)**是股价最常用的画法。每一根蜡烛代表一段时间(日K=一天,周K=一周)的四个价格:开盘价、收盘价、最高价、最低价。" },
+          { t: "fig", kind: "kline" },
           { t: "ul", items: [
             "**实体**:开盘价和收盘价之间的粗柱。收盘高于开盘=上涨,收盘低于开盘=下跌。",
             "**影线**:实体上下的细线,表示这段时间摸到过的最高价和最低价。",
@@ -86,6 +88,7 @@ export const LEARN: Chapter[] = [
         id: "adjust", title: "复权是什么(为什么有的图有\"断崖\")",
         blocks: [
           { t: "p", text: "公司\"拆股\"或\"分红\"会让股价在某天突然大幅跳变——比如 10 拆 1,股价一夜从 $120 变 $12,但你的股数×10,财富没变。若图上不处理,就会出现一道**垂直断崖**,看起来像暴跌,其实是假象。" },
+          { t: "fig", kind: "adjust" },
           { t: "ul", items: [
             "**不复权**:显示每天的真实成交价,保留断崖——反映\"当时实际是多少钱\"。",
             "**前复权**:把历史价格按拆股/分红比例调整,让曲线**平滑连续**,最新价保持真实。看长期走势、算涨幅、用技术指标时都该用前复权。",
