@@ -277,31 +277,48 @@ def margin_trading(code: str) -> list:
 # ═══════════════════ 5. 大宗交易 — akshare ═══════════════════
 
 def block_trade(code: str) -> list:
+    """大宗交易(近60日每日统计)。akshare stock_dzjy_mrtj → 按代码过滤。"""
     try:
         from services.akshare_lazy import akshare as _ak
 
-        df = _ak().stock_dzjy_mrmx(symbol="A股", start_date=(date.today() - timedelta(days=60)).strftime("%Y-%m-%d"),
-                                end_date=date.today().strftime("%Y-%m-%d"))
-        if df is None or df.empty: return []
-        mask = df.iloc[:, 1].astype(str).str.contains(code)
-        df = df[mask]
-        return [{"date": str(r.iloc[0])[:10], "price": float(r.iloc[3] or 0),
-                 "amount": float(r.iloc[4] or 0), "buyer": str(r.iloc[5])[:20],
-                 "seller": str(r.iloc[6])[:20]} for _, r in df.iterrows()][:10]
-    except: return []
+        df = _ak().stock_dzjy_mrtj(
+            start_date=(date.today() - timedelta(days=60)).strftime("%Y%m%d"),
+            end_date=date.today().strftime("%Y%m%d"))
+        if df is None or df.empty or "证券代码" not in df.columns:
+            return []
+        df = df[df["证券代码"].astype(str).str.zfill(6) == code]
+        out = []
+        for _, r in df.iterrows():
+            out.append({
+                "日期": str(r.get("交易日期"))[:10],
+                "成交价": round(float(r.get("成交价") or 0), 2),
+                "折溢率%": round(float(r.get("折溢率") or 0), 2),
+            })
+        return list(reversed(out))[:10]
+    except Exception:
+        return []
 
 
 # ═══════════════════ 6. 股东户数 — akshare ═══════════════════
 
 def shareholder_change(code: str) -> list:
+    """股东户数变化。akshare stock_zh_a_gdhs_detail_em(旧 stock_holder_change_em 已移除)。"""
     try:
         from services.akshare_lazy import akshare as _ak
 
-        df = _ak().stock_holder_change_em(symbol=code)
-        if df is None or df.empty: return []
-        return [{"date": str(r.iloc[0])[:10], "holders": int(r.iloc[1] or 0)}
-                for _, r in df.tail(8).iterrows()]
-    except: return []
+        df = _ak().stock_zh_a_gdhs_detail_em(symbol=code)
+        if df is None or df.empty or "股东户数-本次" not in df.columns:
+            return []
+        out = []
+        for _, r in df.tail(8).iterrows():
+            out.append({
+                "截止日": str(r.get("股东户数统计截止日"))[:10],
+                "股东户数": int(r.get("股东户数-本次") or 0),
+                "增减%": round(float(r.get("股东户数-增减比例") or 0), 2),
+            })
+        return list(reversed(out))
+    except Exception:
+        return []
 
 
 # ═══════════════════ 7. 分红 — akshare ═══════════════════
@@ -409,33 +426,40 @@ def sina_financial_report(code: str, report_type: str = "lrb") -> list:
 # ═══════════════════ 10. 同花顺一致预期 EPS ═══════════════════
 
 def consensus_eps(code: str) -> dict:
-    """同花顺分析师一致预期 EPS（近3年）。
-    数据源：basic.10jqka.com.cn/stock/EPS/
+    """分析师一致预期 EPS。改读本地 stock_eps_forecast 表(东方财富源,1400+只、每日更新),
+    替代此前失效的同花顺实时爬取(该接口已返回空)。
     """
     try:
-        prefix = "sh" if code.startswith(("6", "9")) else "sz"
-        url = f"https://basic.10jqka.com.cn/stock/EPS/{prefix}{code}.json"
-        r = requests.get(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-                "Referer": f"https://basic.10jqka.com.cn/{code}/",
-            },
-            timeout=10,
-        )
-        if r.status_code != 200:
-            return {}
-        data = r.json()
-        # 返回格式：{year: eps_forecast, ...}
-        items = data.get("data", data) if isinstance(data, dict) else {}
-        if not items:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                """SELECT f.eps_fy1, f.eps_fy2, f.eps_fy1_year, f.eps_fy2_year,
+                          f.analyst_count, f.rating_buy, f.revision_3m_pct, f.as_of_date
+                   FROM stock_eps_forecast f JOIN stocks s ON s.id=f.stock_id
+                   WHERE s.code=? ORDER BY f.as_of_date DESC LIMIT 1""",
+                (code,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
             return {}
         forecasts = []
-        for year, val in sorted(items.items()):
-            try:
-                forecasts.append({"year": str(year), "eps": round(float(val), 4)})
-            except (TypeError, ValueError):
-                continue
-        return {"source": "同花顺", "forecasts": forecasts}
+        for yr, eps in ((row["eps_fy1_year"], row["eps_fy1"]), (row["eps_fy2_year"], row["eps_fy2"])):
+            if yr and eps is not None:
+                try:
+                    forecasts.append({"year": str(int(yr)), "eps": round(float(eps), 4)})
+                except (TypeError, ValueError):
+                    continue
+        if not forecasts:
+            return {}
+        return {
+            "source": "东方财富",
+            "forecasts": forecasts,
+            "analyst_count": row["analyst_count"],
+            "rating_buy": row["rating_buy"],
+            "revision_3m_pct": row["revision_3m_pct"],
+            "as_of_date": row["as_of_date"],
+        }
     except Exception:
         return {}

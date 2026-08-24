@@ -13,6 +13,7 @@ interface Props { code: string }
 
 export function ConsensusEpsCard({ code }: Props) {
   const [forecasts, setForecasts] = useState<Forecast[]>([]);
+  const [meta, setMeta] = useState<{ source?: string; analyst_count?: number | null; rating_buy?: number | null; as_of_date?: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -20,7 +21,7 @@ export function ConsensusEpsCard({ code }: Props) {
     setLoading(true);
     fetch(`/api/consensus-eps/${code}`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => setForecasts(d?.forecasts ?? []))
+      .then(d => { setForecasts(d?.forecasts ?? []); setMeta(d ?? null); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [code]);
@@ -34,7 +35,9 @@ export function ConsensusEpsCard({ code }: Props) {
       <CardHeader className="pb-2">
         <CardTitle className="text-sm flex items-center gap-2">
           <TrendingUp className="h-4 w-4" /> 分析师一致预期 EPS
-          <span className="text-xs font-normal text-muted-foreground ml-1">同花顺</span>
+          <span className="text-xs font-normal text-muted-foreground ml-1">
+            {meta?.source ?? "东方财富"}{meta?.analyst_count ? ` · ${meta.analyst_count} 位分析师` : ""}
+          </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0 space-y-2">
