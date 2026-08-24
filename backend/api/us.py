@@ -520,6 +520,51 @@ async def us_list(
         conn.close()
 
 
+def _build_extras(ticker: str) -> dict:
+    from services.us_market_adapter import (
+        fetch_us_actions, fetch_us_estimates, fetch_us_holders, fetch_us_insider, fetch_us_news,
+    )
+    d: dict = {}
+    for key, fn in (("estimates", fetch_us_estimates), ("holders", fetch_us_holders),
+                    ("insider", fetch_us_insider), ("actions", fetch_us_actions), ("news", fetch_us_news)):
+        try:
+            d[key] = fn(ticker)
+        except Exception:  # noqa: BLE001
+            d[key] = None
+    return d
+
+
+def _get_us_extras(ticker: str, ttl_hours: float = 20.0) -> dict:
+    """扩展数据(前瞻预期/持股/内部人/分红/新闻)缓存,TTL 20h,懒加载。"""
+    import datetime as dt
+    try:
+        conn = _rw_conn()
+    except sqlite3.OperationalError:
+        return _build_extras(ticker)
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS us_extras (ticker TEXT PRIMARY KEY, data TEXT, updated_at TEXT)")
+        row = conn.execute("SELECT data,updated_at FROM us_extras WHERE ticker=?", (ticker,)).fetchone()
+        if row:
+            try:
+                if (dt.datetime.now() - dt.datetime.fromisoformat(row["updated_at"])).total_seconds() < ttl_hours * 3600:
+                    return json.loads(row["data"])
+            except (ValueError, TypeError):
+                pass
+        data = _build_extras(ticker)
+        conn.execute("INSERT OR REPLACE INTO us_extras(ticker,data,updated_at) VALUES(?,?,?)",
+                     (ticker, json.dumps(data, ensure_ascii=False), dt.datetime.now().isoformat()))
+        conn.commit()
+        return data
+    finally:
+        conn.close()
+
+
+@router.get("/{ticker}/extras")
+def us_extras(ticker: str):
+    """扩展数据:前瞻一致预期 / 机构持股 / 内部人 / 分红拆股 / 新闻。异步懒加载,缓存 20h。"""
+    return _get_us_extras(ticker.upper())
+
+
 @router.get("/{ticker}/klines")
 def us_klines(
     ticker: str,

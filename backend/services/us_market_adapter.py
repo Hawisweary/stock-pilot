@@ -387,6 +387,156 @@ def fetch_us_financials(ticker: str) -> dict[str, Any]:
     return out
 
 
+def fetch_us_estimates(ticker: str) -> dict[str, Any]:
+    """前瞻一致预期:本年/明年 EPS·营收预测(avg+增速+分析师数)+ EPS 上下修。"""
+    import warnings
+
+    import yfinance as yf
+
+    warnings.filterwarnings("ignore")
+    out: dict[str, Any] = {"periods": [], "revisions": None}
+    try:
+        t = yf.Ticker(ticker)
+        ee = t.earnings_estimate
+        re = t.revenue_estimate
+        rev = t.eps_revisions
+    except Exception:
+        return out
+    labels = {"0y": "本财年", "+1y": "明财年"}
+    for key, cn in labels.items():
+        try:
+            e = ee.loc[key] if ee is not None and key in ee.index else None
+            r = re.loc[key] if re is not None and key in re.index else None
+            if e is None:
+                continue
+            out["periods"].append({
+                "label": cn,
+                "eps_avg": _f(e.get("avg")), "eps_low": _f(e.get("low")), "eps_high": _f(e.get("high")),
+                "eps_growth": _f(e.get("growth")), "n": int(e.get("numberOfAnalysts") or 0),
+                "rev_avg": _f(r.get("avg")) if r is not None else None,
+                "rev_growth": _f(r.get("growth")) if r is not None else None,
+            })
+        except Exception:
+            continue
+    try:
+        if rev is not None and "0y" in rev.index:
+            row = rev.loc["0y"]
+            out["revisions"] = {
+                "up_30d": int(row.get("upLast30days") or 0),
+                "down_30d": int(row.get("downLast30days") or 0),
+            }
+    except Exception:
+        pass
+    return out
+
+
+def fetch_us_holders(ticker: str) -> dict[str, Any]:
+    """持股结构:机构/内部人占比 + 机构数 + 前十大机构。"""
+    import warnings
+
+    import yfinance as yf
+
+    warnings.filterwarnings("ignore")
+    out: dict[str, Any] = {"inst_pct": None, "insider_pct": None, "inst_count": None, "top": []}
+    try:
+        t = yf.Ticker(ticker)
+        mh = t.major_holders
+        ih = t.institutional_holders
+    except Exception:
+        return out
+    try:
+        if mh is not None and "Value" in mh.columns:
+            g = mh["Value"].to_dict()
+            out["inst_pct"] = _f(g.get("institutionsPercentHeld"))
+            out["insider_pct"] = _f(g.get("insidersPercentHeld"))
+            c = g.get("institutionsCount")
+            out["inst_count"] = int(c) if c else None
+    except Exception:
+        pass
+    try:
+        if ih is not None and not ih.empty:
+            for _, r in ih.head(10).iterrows():
+                out["top"].append({
+                    "holder": str(r.get("Holder", "")), "pct": _f(r.get("pctHeld")),
+                    "value": _f(r.get("Value")), "chg": _f(r.get("pctChange")),
+                })
+    except Exception:
+        pass
+    return out
+
+
+def fetch_us_insider(ticker: str) -> dict[str, Any] | None:
+    """内部人近6月增减持汇总(高管买卖)。"""
+    import warnings
+
+    import yfinance as yf
+
+    warnings.filterwarnings("ignore")
+    try:
+        ip = yf.Ticker(ticker).insider_purchases
+        if ip is None or ip.empty:
+            return None
+        m = {str(r.iloc[0]): r for _, r in ip.iterrows()}
+        def sh(k):
+            row = m.get(k)
+            return _f(row.iloc[1]) if row is not None else None
+        return {"buy_shares": sh("Purchases"), "sell_shares": sh("Sales"),
+                "net_shares": sh("Net Shares Purchased (Sold)")}
+    except Exception:
+        return None
+
+
+def fetch_us_actions(ticker: str) -> dict[str, Any]:
+    """分红 + 拆股历史(近几期)。"""
+    import warnings
+
+    import yfinance as yf
+
+    warnings.filterwarnings("ignore")
+    out: dict[str, Any] = {"dividends": [], "splits": []}
+    try:
+        t = yf.Ticker(ticker)
+        div = t.dividends
+        spl = t.splits
+        if div is not None and len(div):
+            for dt_, v in list(div.items())[-8:]:
+                out["dividends"].append({"date": str(dt_)[:10], "amount": _f(v)})
+        if spl is not None and len(spl):
+            for dt_, v in list(spl.items())[-5:]:
+                out["splits"].append({"date": str(dt_)[:10], "ratio": _f(v)})
+    except Exception:
+        pass
+    return out
+
+
+def fetch_us_news(ticker: str, n: int = 8) -> list[dict[str, Any]]:
+    """个股新闻(标题/来源/链接/时间)。yfinance news 结构多变,防御式解析。"""
+    import warnings
+
+    import yfinance as yf
+
+    warnings.filterwarnings("ignore")
+    try:
+        raw = yf.Ticker(ticker).news or []
+    except Exception:
+        return []
+    out = []
+    for it in raw[:n]:
+        c = it.get("content", it) if isinstance(it, dict) else {}
+        title = c.get("title") or it.get("title")
+        if not title:
+            continue
+        prov = c.get("provider") or {}
+        link = (c.get("canonicalUrl") or {}).get("url") or it.get("link") or (c.get("clickThroughUrl") or {}).get("url")
+        out.append({
+            "title": title,
+            "publisher": (prov.get("displayName") if isinstance(prov, dict) else None) or it.get("publisher"),
+            "link": link,
+            "date": (c.get("pubDate") or c.get("displayTime") or "")[:10],
+        })
+    return out
+
+
 def fetch_us_target_history(ticker: str) -> list[dict[str, Any]]:
     """全量历史评级/目标价(带日期),供"分析师准确度"回测用。
 

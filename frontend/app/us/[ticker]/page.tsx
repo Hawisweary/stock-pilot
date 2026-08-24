@@ -79,6 +79,18 @@ const fmtCap = (v?: number | null) => {
 };
 const fmtNum = (v?: number | null, d = 2) => (v == null ? "—" : v.toFixed(d));
 
+type Extras = {
+  estimates?: {
+    periods?: { label: string; eps_avg?: number | null; eps_growth?: number | null; n?: number; rev_growth?: number | null }[];
+    revisions?: { up_30d?: number; down_30d?: number } | null;
+  } | null;
+  holders?: { inst_pct?: number | null; insider_pct?: number | null; inst_count?: number | null;
+    top?: { holder: string; pct?: number | null; chg?: number | null }[] } | null;
+  insider?: { buy_shares?: number | null; sell_shares?: number | null; net_shares?: number | null } | null;
+  actions?: { dividends?: { date: string; amount?: number | null }[]; splits?: { date: string; ratio?: number | null }[] } | null;
+  news?: { title: string; publisher?: string | null; link?: string | null; date?: string }[] | null;
+};
+
 export default function UsDetailPage() {
   const { ticker } = useParams<{ ticker: string }>();
   const router = useRouter();
@@ -88,6 +100,7 @@ export default function UsDetailPage() {
   const [adjust, setAdjust] = useState(true);
   const [bars, setBars] = useState<Bar[] | null>(null);
   const [barsLoading, setBarsLoading] = useState(true);
+  const [extras, setExtras] = useState<Extras | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -96,6 +109,8 @@ export default function UsDetailPage() {
       .then(setD)
       .catch(() => setD({ error: "加载失败" } as Detail))
       .finally(() => setLoading(false));
+    setExtras(null);
+    fetch(`/api/us/${ticker}/extras`).then((r) => r.json()).then(setExtras).catch(() => setExtras(null));
   }, [ticker]);
 
   useEffect(() => {
@@ -447,6 +462,91 @@ export default function UsDetailPage() {
                 </table>
               </div>
               <div className="text-[10px] text-muted-foreground/70 mt-1">超预期为正=实际盈利超过分析师预期(beat),连续 beat 常反映经营强于预期。数据 yfinance,仅供参考。</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 前瞻一致预期 */}
+      {extras?.estimates && (extras.estimates.periods?.length ?? 0) > 0 && (
+        <div className="rounded-xl border bg-card p-4 space-y-2">
+          <div className="text-sm font-semibold">前瞻一致预期<InfoDot k="target_price" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            {extras.estimates.periods!.map((p2) => (
+              <div key={p2.label} className="rounded-lg border bg-background p-2.5">
+                <div className="text-[11px] text-muted-foreground">{p2.label} · {p2.n} 位分析师</div>
+                <div className="text-base font-bold tabular-nums">EPS ${fmtNum(p2.eps_avg)}
+                  {p2.eps_growth != null && <span className="text-xs ml-1" style={{ color: p2.eps_growth >= 0 ? US_UP : US_DOWN }}>{p2.eps_growth > 0 ? "+" : ""}{(p2.eps_growth * 100).toFixed(1)}%</span>}
+                </div>
+                <div className="text-[11px] text-muted-foreground">营收增速 {p2.rev_growth != null ? `${(p2.rev_growth * 100).toFixed(1)}%` : "—"}</div>
+              </div>
+            ))}
+          </div>
+          {extras.estimates.revisions && (
+            <div className="text-[11px] text-muted-foreground">
+              近30天 EPS 预期修正:<span style={{ color: US_UP }}>上调 {extras.estimates.revisions.up_30d}</span> · <span style={{ color: US_DOWN }}>下调 {extras.estimates.revisions.down_30d}</span> 家
+              {(extras.estimates.revisions.up_30d ?? 0) > (extras.estimates.revisions.down_30d ?? 0) ? "(情绪偏暖)" : "(情绪偏冷)"}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 持股结构 + 内部人 */}
+      {extras?.holders && (extras.holders.inst_pct != null || (extras.holders.top?.length ?? 0) > 0) && (
+        <div className="rounded-xl border bg-card p-4 space-y-2">
+          <div className="text-sm font-semibold">持股结构 · 谁在持有</div>
+          <div className="flex gap-4 text-xs flex-wrap">
+            <span>机构持股 <b className="tabular-nums">{extras.holders.inst_pct != null ? `${(extras.holders.inst_pct * 100).toFixed(1)}%` : "—"}</b></span>
+            <span>内部人 <b className="tabular-nums">{extras.holders.insider_pct != null ? `${(extras.holders.insider_pct * 100).toFixed(2)}%` : "—"}</b></span>
+            <span>机构数 <b className="tabular-nums">{extras.holders.inst_count?.toLocaleString() ?? "—"}</b></span>
+            {extras.insider?.net_shares != null && (
+              <span>内部人近6月净 <b className="tabular-nums" style={{ color: extras.insider.net_shares >= 0 ? US_UP : US_DOWN }}>{extras.insider.net_shares >= 0 ? "+" : ""}{Math.round(extras.insider.net_shares).toLocaleString()} 股</b></span>
+            )}
+          </div>
+          {(extras.holders.top?.length ?? 0) > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5 text-[11px]">
+              {extras.holders.top!.slice(0, 6).map((h) => (
+                <div key={h.holder} className="flex justify-between border-b border-border/40 py-0.5">
+                  <span className="text-muted-foreground truncate mr-2">{h.holder}</span>
+                  <span className="tabular-nums shrink-0">{h.pct != null ? `${(h.pct * 100).toFixed(2)}%` : "—"}
+                    {h.chg != null && <span style={{ color: h.chg >= 0 ? US_UP : US_DOWN }}> {h.chg > 0 ? "▲" : h.chg < 0 ? "▼" : ""}</span>}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 分红 + 新闻 */}
+      {extras && ((extras.actions?.dividends?.length ?? 0) > 0 || (extras.news?.length ?? 0) > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {(extras.actions?.dividends?.length ?? 0) > 0 && (
+            <div className="rounded-xl border bg-card p-4">
+              <div className="text-sm font-semibold mb-2">分红 · 拆股历史</div>
+              <div className="text-[11px] text-muted-foreground space-y-0.5">
+                {extras.actions!.dividends!.slice(-6).reverse().map((dv) => (
+                  <div key={dv.date} className="flex justify-between border-b border-border/40 py-0.5">
+                    <span>{dv.date}</span><span className="tabular-nums">每股 ${fmtNum(dv.amount)}</span>
+                  </div>
+                ))}
+                {(extras.actions?.splits?.length ?? 0) > 0 && (
+                  <div className="pt-1">拆股:{extras.actions!.splits!.map((s) => `${s.date} (${s.ratio}:1)`).join(" · ")}</div>
+                )}
+              </div>
+            </div>
+          )}
+          {(extras.news?.length ?? 0) > 0 && (
+            <div className="rounded-xl border bg-card p-4">
+              <div className="text-sm font-semibold mb-2">近期新闻</div>
+              <div className="space-y-1.5">
+                {extras.news!.slice(0, 6).map((nw, i) => (
+                  <a key={i} href={nw.link || "#"} target="_blank" rel="noopener noreferrer"
+                    className="block text-xs leading-snug hover:text-primary">
+                    · {nw.title}
+                    <span className="text-[10px] text-muted-foreground ml-1">{nw.publisher}{nw.date ? ` · ${nw.date}` : ""}</span>
+                  </a>
+                ))}
+              </div>
             </div>
           )}
         </div>
