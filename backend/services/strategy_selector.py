@@ -244,6 +244,49 @@ def _select_factor(
     return [_row_to_selected(r) for r in rows]
 
 
+def _select_dual_ma(
+    conn: sqlite3.Connection,
+    min_score: float,
+    top_n: int,
+) -> List[SelectedStock]:
+    """双均线:F031 是 [-1,1] 金叉信号因子,不能套 0-100 的 min_score(否则恒空)。
+    改为「金叉股(F031>=0.5)∩ 按 V5 综合分排序」取 top_n —— 技术金叉 + 基本面好。
+    """
+    latest = conn.execute("SELECT MAX(date) FROM factor_values WHERE factor_id='F031'").fetchone()
+    if not latest or not latest[0]:
+        return []
+    dt = latest[0]
+    golden = {
+        r[0] for r in conn.execute(
+            "SELECT stock_id FROM factor_values WHERE factor_id='F031' AND date=? AND value>=0.5",
+            (dt,),
+        )
+    }
+    if not golden:
+        return []
+    spec = resolve_score_spec("composite")
+    if spec:  # 金叉股里按 V5 综合分排序
+        ranked = fetch_latest_top_n(conn, spec, 0.0, 100000)
+        out: list[SelectedStock] = []
+        for r in ranked:
+            sid = r["stock_id"] if hasattr(r, "keys") else r[0]
+            if sid in golden:
+                out.append(_row_to_selected(r))
+                if len(out) >= top_n:
+                    break
+        if out:
+            return out
+    # 回退:无 V5 分时,直接取金叉股(按代码稳定序)
+    rows = conn.execute(
+        """SELECT s.id AS stock_id, s.code, s.name, fv.value AS score
+           FROM factor_values fv JOIN stocks s ON fv.stock_id=s.id
+           WHERE fv.factor_id='F031' AND fv.date=? AND fv.value>=0.5 AND s.is_active=1
+           ORDER BY s.code LIMIT ?""",
+        (dt, top_n),
+    ).fetchall()
+    return [_row_to_selected(r) for r in rows]
+
+
 def _turtle_live_score(
     conn: sqlite3.Connection,
     stock_id: int,
@@ -330,6 +373,8 @@ def select_top_n(
             rows = _select_dividend_defensive(conn, min_score, top_n)
         elif meta.id == "reversal":
             rows = _select_reversal(conn, min_score, top_n)
+        elif meta.id == "dual_ma":
+            rows = _select_dual_ma(conn, min_score, top_n)
         elif meta.kind in ("factor", "combo"):
             fid = _resolve_factor_id(key, combination_id)
             if not fid:
