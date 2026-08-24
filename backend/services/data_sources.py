@@ -271,7 +271,9 @@ def eastmoney_stock_news(code: str, page_size: int = 10) -> list[dict]:
     try:
         json_str = text[text.index("(") + 1 : text.rindex(")")]
         d = json.loads(json_str)
-        articles = d.get("result", {}).get("cmsArticleWebOld", {}).get("list", [])
+        articles = d.get("result", {}).get("cmsArticleWebOld", [])  # 结构变更:原 .list 已改为直接数组
+        if not isinstance(articles, list):
+            articles = articles.get("list", []) if isinstance(articles, dict) else []
         import re
         return [{
             "title": re.sub(r'<[^>]+>', '', a.get("title", "")),

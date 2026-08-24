@@ -227,17 +227,23 @@ def dragon_tiger_board(code: str, report_date: str | None = None) -> dict:
 # ═══════════════════ 3. 解禁 — akshare ═══════════════════
 
 def unlock_calendar(code: str, days: int = 90) -> list:
+    """限售解禁批次。akshare stock_restricted_release_queue_em(旧 summary_em 签名已变)。"""
     try:
         from services.akshare_lazy import akshare as _ak
 
-        df = _ak().stock_restricted_release_summary_em(symbol=code)
-        if df is None or df.empty: return []
+        df = _ak().stock_restricted_release_queue_em(symbol=code)
+        if df is None or df.empty or "解禁时间" not in df.columns:
+            return []
         result = []
         for _, r in df.iterrows():
-            result.append({"date": str(r.iloc[0])[:15], "shares": round(float(r.iloc[1] or 0) / 10000, 1),
-                           "ratio": float(r.iloc[2] or 0) if len(r) > 2 else 0})
+            result.append({
+                "解禁日": str(r.get("解禁时间"))[:10],
+                "解禁数量(万股)": round(float(r.get("解禁数量") or 0) / 10000, 1),
+                "股东数": int(r.get("解禁股东数") or 0),
+            })
         return result[:10]
-    except: return []
+    except Exception:
+        return []
 
 
 # ═══════════════════ 4. 融资融券 — akshare ═══════════════════
