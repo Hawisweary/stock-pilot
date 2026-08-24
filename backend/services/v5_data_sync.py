@@ -443,5 +443,18 @@ def sync_v5_weekly(stock_ids: list[int] | None = None) -> dict:
     except Exception as e:
         extra["etf_score"] = {"error": str(e)}
 
+    # A股实时接口健康巡检(akshare/东财常悄改接口→静默返空)。返回码非0=有失效。不阻塞。
+    try:
+        import os
+        import subprocess
+        import sys
+
+        script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "health_check_astock.py")
+        r = subprocess.run([sys.executable, script], capture_output=True, text=True, timeout=600)
+        tail = (r.stdout or "").strip().split("\n")[-1][:120]
+        extra["astock_health"] = tail if r.returncode == 0 else {"⚠️失效": tail}
+    except Exception as e:
+        extra["astock_health"] = {"error": str(e)}
+
     result["weekly_extra"] = extra
     return result
