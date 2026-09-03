@@ -40,7 +40,7 @@ def _run_script_subprocess(script_name: str, args: list[str], timeout_sec: int =
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("job", choices=["nightly", "weekly", "daily", "morning", "technical_retry", "warm_cache", "warm_decay", "regime_l2_l3"])
+    parser.add_argument("job", choices=["nightly", "weekly", "daily", "morning", "technical_retry", "warm_cache", "warm_decay", "regime_l2_l3", "us_daily"])
     parser.add_argument("--factor", default=None, help="warm_decay: 因子ID")
     parser.add_argument("--fd", type=int, default=20, help="warm_decay: 未来收益天数")
     args = parser.parse_args()
@@ -137,6 +137,12 @@ def main() -> int:
             f"ok={r.get('ok')} bucket={r.get('regime_bucket')} "
             f"primary={r.get('primary_strategy')} matrix={r.get('matrix_refreshed')}"
         )
+    elif args.job == "us_daily":  # 美股/ETF 盘后同步(美东时区触发)
+        outs = [
+            _run_script_subprocess("us_sync.py", ["--quotes-period", "5d"], 1800),
+            _run_script_subprocess("us_etf_sync.py", ["--quotes-only"], 600),
+        ]
+        summary = " | ".join(outs)[:600]
     else:  # daily
         from services.scheduler import run_daily_tasks
 

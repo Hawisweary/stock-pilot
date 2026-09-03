@@ -4,8 +4,14 @@ import sqlite3
 import threading
 import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from config import DATA_DIR, DB_PATH, latest_trading_date
+
+# 各市场用各自时区触发:A股按北京、美股按美东。裸 datetime.now() 会跟着主机时区
+# (如机器在美西 PDT),导致 A股盘后任务错位约15小时——故显式指定时区。
+_TZ_CN = ZoneInfo("Asia/Shanghai")
+_TZ_US = ZoneInfo("America/New_York")
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +22,7 @@ _STATE_KEYS = {
     "technical_retry": "last_technical_retry_date",
     "daily_tasks": "last_daily_tasks_date",
     "morning_tasks": "last_morning_tasks_date",
+    "us_daily": "last_us_daily_date",
 }
 
 
@@ -229,7 +236,7 @@ def start_scheduler(app):
         # 不放这里:本循环在 _run_job_subprocess 阻塞期间(可数小时)无法自查,
         # 正是上次 WAL 涨到 158GB 无人干预的根因。
         while True:
-            now = datetime.now()
+            now = datetime.now(_TZ_CN)  # A股任务按北京时间触发
             today_key = now.strftime("%Y-%m-%d")
             from config import (
                 V5_NIGHTLY_FETCH_HOUR,
@@ -317,6 +324,24 @@ def start_scheduler(app):
                     logger.warning("[Scheduler] run_daily_tasks failed: %s", e)
                 state[_STATE_KEYS["daily_tasks"]] = today_key
                 _save_state(_STATE_KEYS["daily_tasks"], today_key)
+
+            # ── 美股/ETF:按【美东时间】盘后触发(独立于 A股北京时区)──
+            # 美股 16:00 ET 收盘,17:30 后 yfinance EOD 就绪;工作日触发,状态用美东日期。
+            us_now = datetime.now(_TZ_US)
+            us_key = us_now.strftime("%Y-%m-%d")
+            if (
+                us_now.weekday() < 5
+                and us_now.hour * 60 + us_now.minute >= 17 * 60 + 30
+                and state.get(_STATE_KEYS["us_daily"]) != us_key
+            ):
+                logger.info("[Scheduler] %s ET 触发美股同步(子进程)...", us_now.strftime("%H:%M"))
+                try:
+                    out = _run_job_subprocess("us_daily", timeout_sec=2400)
+                    logger.info("[Scheduler] 美股同步(子进程): %s", out)
+                except Exception as e:
+                    logger.warning("[Scheduler] us_daily failed: %s", e)
+                state[_STATE_KEYS["us_daily"]] = us_key
+                _save_state(_STATE_KEYS["us_daily"], us_key)
             time.sleep(30)
 
     t = threading.Thread(target=_loop, daemon=True, name="daily-scheduler")
@@ -531,12 +556,7 @@ def run_daily_tasks():
             ("compute_alpha_factors_v1.py", "资金共振", ["--days", "5", "--skip-surprise"], 900),
             ("akshare_sync_market_breadth.py", "市场广度", [], 300),
             ("tushare_sync_etf.py", "ETF", ["--quotes-days", "3", "--flow-days", "3"], 600),
-            # 美股(独立库 us.db,不阻塞主站):池+名+近5日行情全量刷新(所有股拿到当天+
-            # 顺带补此前拉不到的)。温和节奏规避 yfinance 限流;限流则当轮部分刷、次日再续。
-            ("us_sync.py", "美股", ["--quotes-period", "5d"], 1800),
-            # 美股 ETF 行情(独立库,精选111只):ETF 不在 us_stocks,不被上面美股任务覆盖,
-            # 须单独日刷。profile(持仓/费率)变动慢,放 weekly。
-            ("us_etf_sync.py", "美股ETF", ["--quotes-only"], 600),
+            # 美股/ETF 已拆到「us_daily」按美东时间盘后触发,不再挂在 A股 daily 里。
         ]:
             try:
                 _dlog(_fh, f"▶ ②{label}")
