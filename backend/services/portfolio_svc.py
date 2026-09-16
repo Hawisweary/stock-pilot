@@ -1165,10 +1165,22 @@ def build_from_top_n(
                 target_val = total_value * weights[code]
                 cur_val = cur_sh * price
                 deficit = target_val - cur_val
-                min_buy = price * LOT_SIZE * (1 + COMMISSION)
-                if deficit < min_buy:
-                    continue
-                shares = normalize_shares(int(deficit / (price * (1 + COMMISSION))))
+                lot_cost = price * LOT_SIZE * (1 + COMMISSION)
+                if deficit >= lot_cost:
+                    shares = normalize_shares(int(deficit / (price * (1 + COMMISSION))))
+                else:
+                    # 缺口不足一手:高价票(如宁德/新易盛)一手常超单仓预算,老逻辑一刀切 continue
+                    # → 现金永远空置、组合冻结。改为:仅对「未持有的新进目标」补一手,只要一手不
+                    # 突破单仓上限 max_w;超上限则明确记因(不再静默吞现金)。已持有的小幅欠配维持。
+                    if cur_sh > 0:
+                        continue
+                    if price * LOT_SIZE > max_w * total_value + 1e-6:
+                        skipped.append({
+                            "code": code,
+                            "reason": f"单价过高:一手¥{price * LOT_SIZE:,.0f}超单仓上限¥{max_w * total_value:,.0f}",
+                        })
+                        continue
+                    shares = LOT_SIZE
                 if shares < LOT_SIZE:
                     skipped.append({"code": code, "reason": "缺口不足一手"})
                     continue
