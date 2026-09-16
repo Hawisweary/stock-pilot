@@ -845,6 +845,7 @@ def run_daily_tasks():
             queue_scheduled_rebalances,
             queue_turtle_exits,
             snapshot_all_portfolios,
+            stale_pending_orders,
         )
 
         r = snapshot_all_portfolios()
@@ -858,6 +859,12 @@ def run_daily_tasks():
         rb = queue_scheduled_rebalances()
         if rb.get("queued"):
             msg += f"调仓入队({rb['queued']}→{rb.get('execute_date')}) "
+        # 积压哨兵:调仓单超期未执行 → 显形告警(时区/锁/选股静默故障的兜底探针)
+        st = stale_pending_orders(max_age_days=3)
+        if st["stale_count"]:
+            names = ",".join(sorted({str(o["name"])[:6] for o in st["orders"]}))
+            msg += f"⚠️模拟盘积压({st['stale_count']}笔>{st['max_age_days']}天:{names}) "
+            logger.warning("[模拟盘哨兵] %d 笔调仓超期未执行: %s", st["stale_count"], names)
     except Exception as e:
         msg += f"模拟盘:{e} "
 

@@ -77,6 +77,14 @@ async def get_pricing_context():
     return pricing_context_dict()
 
 
+@router.get("/pending-health")
+async def pending_health(max_age_days: int = 3):
+    """模拟盘积压哨兵:调仓单超期未执行的数量与明细。stale_count>0 = 补执行卡住。"""
+    from services.portfolio_svc import stale_pending_orders
+
+    return stale_pending_orders(max_age_days=max_age_days)
+
+
 @router.get("/quote-preview")
 async def quote_preview(code: str, action: str = "buy"):
     from services.portfolio_analytics import estimate_trade_fees

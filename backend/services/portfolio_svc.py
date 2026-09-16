@@ -2053,6 +2053,29 @@ def run_scheduled_rebalances() -> dict:
     return queue_scheduled_rebalances()
 
 
+def stale_pending_orders(max_age_days: int = 3) -> dict:
+    """积压哨兵:execute_date 早于 today-max_age_days 仍 pending 的单 → 补执行卡住的信号。
+    时区/锁/选股等静默故障都会让调仓单堆积而不报错,靠本哨兵在日志/告警里显形。
+    """
+    from datetime import date, timedelta
+
+    cutoff = (date.today() - timedelta(days=max_age_days)).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """SELECT o.portfolio_id, p.name, o.kind, o.execute_date, o.reason
+               FROM portfolio_pending_orders o JOIN portfolios p ON p.id=o.portfolio_id
+               WHERE o.status='pending' AND o.execute_date < ?
+               ORDER BY o.execute_date""",
+            (cutoff,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {"stale_count": len(rows), "max_age_days": max_age_days, "cutoff": cutoff,
+            "orders": [dict(r) for r in rows]}
+
+
 def execute_pending_orders_at_open(as_of: str | None = None, *, force: bool = False) -> dict:
     """执行待处理的自动卖单/调仓（默认按 execute_date 当日开盘价 + 滑点）。
 
