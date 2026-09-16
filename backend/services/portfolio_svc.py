@@ -2174,6 +2174,9 @@ def execute_pending_orders_at_open(as_of: str | None = None, *, force: bool = Fa
                WHERE portfolio_id=? AND kind='rebalance' AND execute_date=? AND status='pending'""",
             (pid, exec_date),
         )
+        # 立即提交:否则外层 conn 持未提交写事务,下一个组合的 build_from_top_n(另开写连接)
+        # 会撞 "database is locked" → 每次调用只能成 1 个组合、积压永远排不空。
+        conn.commit()
         rebalance_done.append(
             {"portfolio_id": pid, "execute_date": exec_date, "count": r.get("count", 0)}
         )
