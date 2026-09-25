@@ -843,6 +843,7 @@ def run_daily_tasks():
         from services.portfolio_svc import (
             queue_momentum_crashes,
             queue_scheduled_rebalances,
+            queue_turtle_entries,
             queue_turtle_exits,
             snapshot_all_portfolios,
             stale_pending_orders,
@@ -853,6 +854,9 @@ def run_daily_tasks():
         te = queue_turtle_exits()
         if te.get("queued"):
             msg += f"海龟出场入队({te['queued']}→{te.get('execute_date')}) "
+        tn = queue_turtle_entries()
+        if tn.get("queued"):
+            msg += f"海龟入场入队({tn['queued']}→{tn.get('execute_date')}) "
         mc = queue_momentum_crashes()
         if mc.get("queued"):
             msg += f"动量崩溃入队({mc['queued']}→{mc.get('execute_date')}) "

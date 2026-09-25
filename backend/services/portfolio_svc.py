@@ -1454,6 +1454,74 @@ def run_turtle_exits(portfolio_id: int | None = None) -> dict:
     return queue_turtle_exits(portfolio_id=portfolio_id)
 
 
+def queue_turtle_entries(portfolio_id: int | None = None) -> dict:
+    """海龟入场:持仓<top_n 且有现金时,扫当前唐奇安突破信号(未持有),按空位等额入队买单,
+    次日开盘成交。补齐"只出不进"缺口——海龟出场是自动的,入场此前从未接入自动化。"""
+    conn = connect_db(write=True)
+    conn.row_factory = sqlite3.Row
+    _ensure_tables(conn)
+    if portfolio_id:
+        portfolios = conn.execute("SELECT * FROM portfolios WHERE id=?", (portfolio_id,)).fetchall()
+    else:
+        portfolios = conn.execute("SELECT * FROM portfolios WHERE default_strategy='turtle'").fetchall()
+
+    signal_date = date.today().isoformat()
+    execute_date = _exec_date_after_signal()
+    queued: list[dict] = []
+    for pf in portfolios:
+        pid = int(pf["id"])
+        s = _portfolio_settings(pf)
+        top_n = int(s.get("default_top_n") or 5)
+        held = {r["code"] for r in conn.execute(
+            "SELECT st.code FROM portfolio_positions pos JOIN stocks st ON st.id=pos.stock_id "
+            "WHERE pos.portfolio_id=?", (pid,))}
+        # 计入已挂但未成交的买单,避免重复入队占满空位
+        pend_buy = {r["code"] for r in conn.execute(
+            "SELECT code FROM portfolio_pending_orders WHERE portfolio_id=? AND kind='turtle_buy' "
+            "AND status='pending'", (pid,))}
+        free = top_n - len(held) - len(pend_buy)
+        if free <= 0:
+            continue
+        cash = float(conn.execute("SELECT cash FROM portfolios WHERE id=?", (pid,)).fetchone()[0] or 0)
+        total = calc_total_value(pid, _conn=conn)
+        min_cash = total * float(s.get("min_cash_pct") or 0) / 100.0
+        max_w = float(s.get("max_weight_pct") or 30) / 100.0
+        investable = cash - min_cash
+        if investable < 1000:
+            continue
+        sigs, err = select_top_n_dicts(
+            strategy="turtle", top_n=top_n * 3,
+            min_score=float(s.get("default_min_score") or 50),
+            lookback=int(s.get("default_lookback") or 20))
+        if err or not sigs:
+            continue
+        cands = [x for x in sigs if x["code"] not in held and x["code"] not in pend_buy][:free]
+        if not cands:
+            continue
+        budget = investable / len(cands)
+        for x in cands:
+            row = conn.execute(
+                "SELECT close FROM stock_daily_quotes WHERE stock_id=? AND close IS NOT NULL "
+                "ORDER BY trade_date DESC LIMIT 1", (x["stock_id"],)).fetchone()
+            px = float(row[0]) if row and row[0] else 0
+            if px <= 0:
+                continue
+            cap_val = min(budget, max_w * total)
+            shares = normalize_shares(int(cap_val / (px * (1 + COMMISSION))))
+            if shares < LOT_SIZE:
+                continue
+            conn.execute(
+                """INSERT INTO portfolio_pending_orders
+                   (portfolio_id, kind, signal_date, execute_date, code, shares, reason)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (pid, "turtle_buy", signal_date, execute_date, x["code"], shares, "turtle_entry"))
+            queued.append({"portfolio_id": pid, "code": x["code"], "name": x.get("name"),
+                           "shares": shares, "execute_date": execute_date})
+    conn.commit()
+    conn.close()
+    return {"queued": len(queued), "execute_date": execute_date, "details": queued}
+
+
 def _scan_momentum_crashes_for_portfolio(
     conn: sqlite3.Connection,
     pf: sqlite3.Row | dict,
@@ -2166,6 +2234,28 @@ def execute_pending_orders_at_open(as_of: str | None = None, *, force: bool = Fa
                     "price": res.get("price"),
                 }
             )
+        elif row["kind"] == "turtle_buy":
+            pid = int(row["portfolio_id"])
+            exec_date = row["execute_date"]
+            try:
+                res = trade(
+                    pid, row["code"], "buy", int(row["shares"]),
+                    reason=row["reason"] or "turtle_entry", _conn=conn,
+                    price_mode="open", as_of_trade_date=exec_date,
+                )
+            except Exception as _e:  # noqa: BLE001 — 单笔买单异常不中断整批
+                errors.append({"order_id": row["id"], "kind": "turtle_buy", "error": str(_e)[:200]})
+                continue
+            if "error" in res:
+                errors.append({"order_id": row["id"], "kind": "turtle_buy", "error": res["error"]})
+                continue
+            conn.execute(
+                "UPDATE portfolio_pending_orders SET status='executed', "
+                "executed_at=datetime('now','localtime') WHERE id=?", (row["id"],))
+            exit_done.append({
+                "portfolio_id": pid, "code": row["code"], "shares": row["shares"],
+                "kind": "turtle_buy", "execute_date": exec_date, "price": res.get("price"),
+            })
         elif row["kind"] == "rebalance":
             rebalance_rows.append(row)
 
