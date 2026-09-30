@@ -747,6 +747,21 @@ def get_portfolio(portfolio_id: int, rt_cache: dict[str, dict] | None = None) ->
         ).fetchall()
     ]
     pf["pricing"] = pricing_context_dict(conn)
+    # 待执行单(收盘入队、下一交易日开盘成交)——此前详情未返回,前端无从展示
+    pf["pending_orders"] = [
+        {
+            "kind": r["kind"], "code": r["code"],
+            "name": (conn.execute("SELECT name FROM stocks WHERE code=?", (r["code"],)).fetchone() or [None])[0]
+                    if r["code"] else None,
+            "shares": r["shares"], "execute_date": r["execute_date"],
+            "signal_date": r["signal_date"], "reason": r["reason"],
+        }
+        for r in conn.execute(
+            "SELECT kind, code, shares, execute_date, signal_date, reason FROM portfolio_pending_orders "
+            "WHERE portfolio_id=? AND status='pending' ORDER BY execute_date, kind",
+            (portfolio_id,),
+        ).fetchall()
+    ]
     conn.close()
     pf["positions"] = positions
     pf["total_value"] = round(pf["cash"] + sum(p["market_value"] for p in positions), 2)

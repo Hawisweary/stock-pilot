@@ -399,6 +399,9 @@ function PortfolioInner() {
   const journal = (selected?.journal || []).filter((j) =>
     journalFilter === "all" ? true : j.action === journalFilter
   );
+  type PendingOrder = { kind: string; code: string | null; name: string | null; shares: number | null; execute_date: string; reason: string | null };
+  const pending: PendingOrder[] = ((selected as unknown as { pending_orders?: PendingOrder[] })?.pending_orders) || [];
+  const kindLabel = (k: string) => ({ turtle_buy: "海龟买入", turtle_sell: "海龟出场", momentum_sell: "动量出场", rebalance: "调仓" }[k] || k);
 
   return (
     <BetaShell title="模拟交易" subtitle="实时/EOD 定价 · 滑点 · 涨跌停 · T+1">
@@ -778,6 +781,33 @@ function PortfolioInner() {
                     feePreview={feePreview} onBuy={() => doTrade("buy")} onSell={() => doTrade("sell")} />
                 </CardContent>
               </Card>
+              {pending.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-1.5">
+                      <Bell className="h-3.5 w-3.5 text-muted-foreground" /> 待执行单 · {pending.length}
+                      <span className="text-[10px] font-normal text-muted-foreground ml-1">收盘生成，下一交易日开盘成交</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-xs space-y-1">
+                    {pending.map((o, i) => {
+                      const buy = o.kind === "turtle_buy";
+                      const sell = o.kind.endsWith("_sell");
+                      return (
+                        <div key={i} className="border-b border-border/50 py-1 flex justify-between gap-2 font-mono tabular-nums">
+                          <span className={buy ? "text-up shrink-0" : sell ? "text-down shrink-0" : "shrink-0"}>
+                            {kindLabel(o.kind)}
+                          </span>
+                          <span className="flex-1 text-muted-foreground truncate text-center">
+                            {o.code ? `${o.code}${o.name ? " " + o.name : ""}${o.shares ? " ×" + o.shares : ""}` : "全组合调仓"}
+                          </span>
+                          <span className="shrink-0 text-muted-foreground">{o.execute_date} 开盘</span>
+                        </div>
+                      );
+                    })}
+                  </CardContent>
+                </Card>
+              )}
               <Card>
                 <CardHeader className="flex flex-row justify-between items-center">
                   <CardTitle className="text-sm">交易记录</CardTitle>
