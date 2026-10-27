@@ -62,3 +62,4 @@ third_party/
 # 含真实密钥,绝不入库
 .envrc
 .env.local
+snapshot/
