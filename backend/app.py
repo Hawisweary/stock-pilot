@@ -174,8 +174,13 @@ async def lifespan(app: FastAPI):
         print(f"[App] FTS 索引同步跳过: {e}")
     # 启动每日自动任务调度（唯一调度入口：services/scheduler.py，
     # 状态持久化+错过补跑+重任务子进程化）
-    from services.scheduler import start_scheduler
-    start_scheduler(app)
+    # 多设备:开发机设 AFR_SCHEDULER_ENABLED=0 → 只跑 API,不跑调度(避免与主机重复执行/改数据)
+    import os as _os
+    if _os.getenv("AFR_SCHEDULER_ENABLED", "1").lower() not in ("0", "false", "no"):
+        from services.scheduler import start_scheduler
+        start_scheduler(app)
+    else:
+        print("[App] 调度器已禁用 (AFR_SCHEDULER_ENABLED=0) —— 本机为开发/从机模式,不跑自动任务")
 
     # 启动即补跑过期的待执行建仓/调仓:后端常上下线,9:35 那一下可能没活着,
     # 导致 pending 单永远卡住(建仓点了没反应)。后台线程延迟执行,避开启动期写竞争。
@@ -197,7 +202,9 @@ async def lifespan(app: FastAPI):
                     continue
                 print(f"[App] 启动补跑待办跳过: {e}")
                 return
-    threading.Thread(target=_catchup_pending, daemon=True).start()
+    # 补跑会执行真实调仓/建仓(改数据)——开发/从机模式不跑
+    if _os.getenv("AFR_SCHEDULER_ENABLED", "1").lower() not in ("0", "false", "no"):
+        threading.Thread(target=_catchup_pending, daemon=True).start()
     # 旧版 fetch-recalc 循环已下线：18:00 逐股抓取(eastmoney已封、每股1.5s约2.2小时)
     # 与周一重算均被 15:30 每日流水线覆盖
     _scheduler_state["note"] = "legacy loop disabled; see services/scheduler.py"
