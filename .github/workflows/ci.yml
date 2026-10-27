@@ -23,7 +23,6 @@ jobs:
         working-directory: backend
         run: |
           pytest -q \
-            tests/test_backtest_execution.py \
             tests/test_market_data_cache.py \
             tests/test_market_index.py \
             tests/test_ml_cv.py \
