@@ -8,6 +8,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Literal, Optional
 
 import config
+from services.trading_costs import cost_model, limit_prices
 
 try:
     from zoneinfo import ZoneInfo
@@ -15,7 +16,7 @@ try:
 except Exception:
     from datetime import timezone, timedelta
     CN_TZ = timezone(timedelta(hours=8))
-SLIPPAGE_PCT = float(os.getenv("AFR_TRADE_SLIPPAGE", "0.001"))
+SLIPPAGE_PCT = cost_model("cn_a").slippage  # 统一来自 trading_costs.yaml(P11)
 STALE_QUOTE_DAYS = int(os.getenv("AFR_STALE_QUOTE_DAYS", "3"))
 
 
@@ -237,6 +238,20 @@ def _get_eod_close(
     return float(row[0]), row[1]
 
 
+def _db_prev_close(conn: sqlite3.Connection, stock_id: int, before_date: str) -> Optional[float]:
+    """before_date 之前最近一个交易日的收盘价(原始价),用于推算涨跌停价。"""
+    try:
+        row = conn.execute(
+            """SELECT close FROM stock_daily_quotes
+               WHERE stock_id=? AND trade_date<? AND close IS NOT NULL
+               ORDER BY trade_date DESC LIMIT 1""",
+            (stock_id, before_date),
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    return float(row[0]) if row and row[0] else None
+
+
 def _fetch_realtime(code: str) -> Optional[dict]:
     try:
         from services.data_sources import tencent_quote
@@ -368,9 +383,16 @@ def resolve_trade_price(
             limit_up = float(rt.get("limit_up") or 0) or None
             limit_down = float(rt.get("limit_down") or 0) or None
 
+    # 实时行情没给涨跌停价时(收盘后 / 开盘价模式),按板块规则用昨收推算(P11)
+    if not for_display and limit_up is None and limit_down is None and raw > 0 and quote_date:
+        prev = _db_prev_close(conn, stock_id, quote_date)
+        if prev:
+            limit_up, limit_down = limit_prices(prev, code, quote_date)
+
     exec_price = apply_slippage(raw, action) if not for_display else raw
     if not for_display:
-        lim_err = check_limit(action, exec_price, limit_up or 0, limit_down or 0)
+        # 用市场价(未加滑点)判断是否在涨跌停价附近;加滑点后再比较会把接近涨停但未涨停的误判为涨停
+        lim_err = check_limit(action, raw, limit_up or 0, limit_down or 0)
         if lim_err:
             if not external:
                 conn.close()

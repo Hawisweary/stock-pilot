@@ -21,6 +21,9 @@ data/
 *.db-wal
 *.db-shm
 
+# 数据基线 / 归档等生成物(P6 data_baseline.py、R1 export_openapi_paths.py 输出)
+backup/
+
 # 虚拟环境
 venv-quant/
 venv/

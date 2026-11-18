@@ -19,6 +19,7 @@ from services.trading_rules import (
     COMMISSION,
     LOT_SIZE,
     cost_basis_price,
+    max_affordable_shares,
     normalize_shares,
     split_cost,
     validate_shares,
@@ -866,7 +867,7 @@ def trade(
     if action == "buy":
         cash_delta, commission, tax = split_cost(amount, "buy")
         if -cash_delta > pf["cash"]:
-            max_sh = int(pf["cash"] / (price * (1 + COMMISSION)) / LOT_SIZE) * LOT_SIZE
+            max_sh = max_affordable_shares(pf["cash"], price)  # 含最低佣金和过户费
             if max_sh < LOT_SIZE:
                 _close(conn, external)
                 return {"error": "资金不足"}
@@ -882,7 +883,7 @@ def trade(
                 return {"error": risk_err}
 
         pf["cash"] += cash_delta
-        basis = cost_basis_price(price)
+        basis = cost_basis_price(price, shares)  # 按实际费用(含最低佣金)
         conn.execute(
             """INSERT INTO portfolio_lots (portfolio_id, stock_id, shares, avg_cost, buy_date)
                VALUES (?,?,?,?,?)""",

@@ -34,7 +34,9 @@ jobs:
             tests/test_regime_jump.py \
             tests/test_regime_validation.py \
             tests/test_technical_rule_engine.py \
-            tests/test_yoy.py
+            tests/test_yoy.py \
+            tests/test_trading_costs.py \
+            tests/test_baseline_common.py
 
   frontend:
     runs-on: ubuntu-latest

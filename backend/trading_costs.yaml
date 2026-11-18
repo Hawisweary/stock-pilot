@@ -1,0 +1,31 @@
+# 统一成本模型与交易规则(重构清单 P11)
+# 自研回测、模拟盘、qlib Exchange(D12)都从这里读取,不要在代码里另写费率。
+# 修改后重启后端生效;可用环境变量 AFR_TRADING_COSTS_FILE 指向另一份文件。
+version: 1
+
+cn_a:                         # A 股
+  commission_rate: 0.0003     # 佣金,双向(万 3)
+  min_commission: 5.0         # 单笔最低佣金(元)
+  stamp_tax_rate: 0.0005      # 印花税,仅卖出(2023-08-28 起 0.05%)
+  transfer_fee_rate: 0.00001  # 过户费,双向(0.001%)
+  slippage: 0.001             # 滑点 / 冲击成本,买入价上浮、卖出价下浮
+  lot_size: 100               # 每手股数
+  t_plus: 1                   # T+1
+  price_limits:               # 涨跌停幅度(%)
+    main: 10                  # 沪深主板
+    st: 5                     # 主板 ST / *ST
+    chinext: 20               # 创业板(300 / 301),自 chinext_20_since 起;此前 10
+    chinext_20_since: "2020-08-24"
+    star: 20                  # 科创板(688 / 689)
+    bse: 30                   # 北交所(4 / 8 / 92 开头)
+    no_limit_first_days: 5    # 注册制新股上市前 5 个交易日不设涨跌幅
+
+us:                           # 美股(D1 接入时使用)
+  commission_rate: 0.0
+  min_commission: 0.0
+  stamp_tax_rate: 0.0
+  transfer_fee_rate: 0.0
+  slippage: 0.001
+  lot_size: 1
+  t_plus: 0
+  price_limits: null          # 无涨跌停

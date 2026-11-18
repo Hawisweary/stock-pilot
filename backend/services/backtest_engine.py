@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
 from config import DB_PATH
+from services.trading_costs import cost_model
 from services.trading_rules import (
     BACKTEST_COMMISSION,
     COMMISSION,
@@ -218,6 +219,15 @@ def run_backtest(
     commission_rate = _base_commission if apply_costs else 0.0
     _slippage = slippage_override if slippage_override is not None else SLIPPAGE
     _stamp_tax = stamp_tax_override if stamp_tax_override is not None else STAMP_TAX
+    # 统一成本模型(P11):佣金含最低佣金、过户费双向、印花税仅卖出;不计成本时费用全为 0
+    cm = cost_model(
+        "cn_a",
+        commission_rate=commission_override,
+        slippage=slippage_override,
+        stamp_tax_rate=stamp_tax_override,
+    )
+    if not apply_costs:
+        cm = cm.without_costs()
     rebalance_map = {"daily": 1, "weekly": 5, "monthly": 20}
     rebalance_every = rebalance_map.get(rebalance, 5)
 
@@ -275,7 +285,7 @@ def run_backtest(
                 ):
                     continue
                 quote = quotes.get(code, {}).get(dt, {})
-                if apply_limit_rules and quote and not trade_allowed("sell", quote, prev_closes.get(code)):
+                if apply_limit_rules and quote and not trade_allowed("sell", quote, prev_closes.get(code), code=code, trade_date=dt):
                     continue
                 price = exec_prices.get(code, available.get(code, 0))
                 if price <= 0:
@@ -284,7 +294,7 @@ def run_backtest(
                 shares = h["shares"]
                 proceeds = shares * exec_price
                 if apply_costs:
-                    proceeds -= proceeds * (commission_rate + _stamp_tax)
+                    proceeds -= cm.sell_fees(proceeds)
                 cash += proceeds
                 trades.append(
                     {
@@ -332,7 +342,7 @@ def run_backtest(
                 slot_val = total_investable / top_n if top_n else total_investable
                 for code in candidates:
                     quote = quotes.get(code, {}).get(dt, {})
-                    if apply_limit_rules and quote and not trade_allowed("buy", quote, prev_closes.get(code)):
+                    if apply_limit_rules and quote and not trade_allowed("buy", quote, prev_closes.get(code), code=code, trade_date=dt):
                         continue
                     price = exec_prices.get(code, available.get(code, 0))
                     if price <= 0:
@@ -342,15 +352,10 @@ def run_backtest(
                     if diff <= 0:
                         continue
                     cost = diff * exec_price
-                    if apply_costs:
-                        cost += cost * commission_rate
+                    cost += cm.buy_fees(cost)
                     if cost > cash:
-                        diff = max(
-                            0,
-                            int(cash / (exec_price * (1 + commission_rate if apply_costs else 0)) / 100)
-                            * 100,
-                        )
-                        cost = diff * exec_price * (1 + commission_rate if apply_costs else 1)
+                        diff = cm.max_affordable_shares(cash, exec_price)
+                        cost = diff * exec_price + cm.buy_fees(diff * exec_price)
                     if diff > 0 and cost <= cash:
                         cash -= cost
                         atr = turtle_atr(quotes.get(code, {}), dates, di, period=lookback)
@@ -398,7 +403,7 @@ def run_backtest(
                     if apply_t1 and holdings[code].get("buy_date") == dt:
                         continue
                     quote = quotes.get(code, {}).get(dt, {})
-                    if apply_limit_rules and quote and not trade_allowed("sell", quote, prev_closes.get(code)):
+                    if apply_limit_rules and quote and not trade_allowed("sell", quote, prev_closes.get(code), code=code, trade_date=dt):
                         continue
                     price = exec_prices.get(code, available.get(code, 0))
                     if price <= 0:
@@ -407,7 +412,7 @@ def run_backtest(
                     shares = holdings[code]["shares"]
                     proceeds = shares * exec_price
                     if apply_costs:
-                        proceeds -= proceeds * (commission_rate + _stamp_tax)
+                        proceeds -= cm.sell_fees(proceeds)
                     cash += proceeds
                     trades.append(
                         {
@@ -435,7 +440,7 @@ def run_backtest(
 
                 for code in selected:
                     quote = quotes.get(code, {}).get(dt, {})
-                    if apply_limit_rules and quote and not trade_allowed("buy", quote, prev_closes.get(code)):
+                    if apply_limit_rules and quote and not trade_allowed("buy", quote, prev_closes.get(code), code=code, trade_date=dt):
                         continue
                     price = exec_prices.get(code, available.get(code, 0))
                     if price <= 0:
@@ -447,15 +452,10 @@ def run_backtest(
                     diff = target_shares - current
                     if diff > 0:
                         cost = diff * exec_price
-                        if apply_costs:
-                            cost += cost * commission_rate
+                        cost += cm.buy_fees(cost)
                         if cost > cash:
-                            diff = max(
-                                0,
-                                int(cash / (exec_price * (1 + commission_rate if apply_costs else 0)) / 100)
-                                * 100,
-                            )
-                            cost = diff * exec_price * (1 + commission_rate if apply_costs else 1)
+                            diff = cm.max_affordable_shares(cash, exec_price)
+                            cost = diff * exec_price + cm.buy_fees(diff * exec_price)
                         if diff > 0 and cost <= cash:
                             cash -= cost
                             if code in holdings:
@@ -493,12 +493,14 @@ def run_backtest(
                     elif diff < 0:
                         if apply_t1 and holdings[code].get("buy_date") == dt:
                             continue
-                        if apply_limit_rules and quote and not trade_allowed("sell", quote, prev_closes.get(code)):
+                        if apply_limit_rules and quote and not trade_allowed("sell", quote, prev_closes.get(code), code=code, trade_date=dt):
                             continue
                         sell_sh = -diff
-                        proceeds = sell_sh * exec_price
+                        # 卖出用卖出方向的滑点(原先误用了买入价)
+                        sell_px = price * (1 - _slippage) if apply_slippage_cost else price
+                        proceeds = sell_sh * sell_px
                         if apply_costs:
-                            proceeds -= proceeds * (commission_rate + _stamp_tax)
+                            proceeds -= cm.sell_fees(proceeds)
                         cash += proceeds
                         holdings[code]["shares"] -= sell_sh
                         if holdings[code]["shares"] <= 0:
@@ -510,7 +512,7 @@ def run_backtest(
                                 "name": name_map.get(code, ""),
                                 "action": "SELL",
                                 "shares": sell_sh,
-                                "price": round(exec_price, 2),
+                                "price": round(sell_px, 2),
                             }
                         )
 
@@ -932,7 +934,10 @@ def _calc_metrics(
             "rebalance": f"每{rebalance_every}天",
             "costs": apply_costs,
             "commission": commission_rate,
+            "min_commission": cost_model("cn_a").min_commission if apply_costs else 0.0,
+            "transfer_fee": cost_model("cn_a").transfer_fee_rate if apply_costs else 0.0,
             "slippage": SLIPPAGE,
+            "cost_config": "trading_costs.yaml",
             "t1": apply_t1,
             "engine": "unified",
             "benchmark_mode": benchmark_mode,
