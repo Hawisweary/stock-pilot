@@ -123,3 +123,23 @@ def test_sync_rate_trend_daily(gap_db):
         assert "date" in trend[0]
         assert "sync_rate_required" in trend[0]
 
+
+
+def test_active_alert_reads_cache_db(gap_db):
+    """score_gap_log 在 cache.db;告警判定必须读缓存库,不能读主库的旧表。"""
+    from database import cache_connect
+    from services.score_gap_log import log_alert
+    from services.score_sync_health import _active_alert
+
+    log_alert("sync_rate", {"sync_rate_required": 0.5}, target_date="2026-05-31")
+    conn = cache_connect()
+    conn.execute(
+        "UPDATE score_gap_log SET created_at=datetime('now', 'localtime', '-60 minutes') "
+        "WHERE event_type='alert'"
+    )
+    conn.commit()
+    conn.close()
+
+    alert = _active_alert("sync_rate", "2026-05-31", sync_rate_required=0.5)
+    assert alert["active"] is True
+    assert alert["sync_rate_required"] == 0.5

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 import config
+from services.score_gap_log import _connect as _gap_log_connect
 from services.score_gap_log import ensure_table, sync_rate_trend_daily
 from services.score_gap_scanner import ALL_SYNC_DIMENSIONS, REQUIRED_DIMENSIONS, scan_gaps
 from services.score_health_monitor import (
@@ -30,7 +31,8 @@ def _active_alert(alert_key: str, target_date: str, sync_rate_required: float) -
         return alert
 
     ensure_table()
-    conn = _connect()
+    # score_gap_log 已在 c5fa7ac 迁到 cache.db;主库里那份停在迁移当天,读它会漏掉之后的告警
+    conn = _gap_log_connect()
     try:
         row = conn.execute(
             """

@@ -98,14 +98,15 @@ def test_sync_refresh_stale(gap_db, monkeypatch):
 
 
 def test_cleanup_old_logs(gap_db):
-    import sqlite3
-
     from services.score_gap_log import cleanup_old_logs, log_scan, query_gap_history
     from services.score_gap_scanner import scan_gaps
 
     report = scan_gaps(target_date="2026-05-31")
     log_scan(report, triggered_by="test")
-    conn = sqlite3.connect(gap_db)
+    # score_gap_log 在缓存库(cache.db),不在主库
+    from database import cache_connect
+
+    conn = cache_connect()
     conn.execute(
         "UPDATE score_gap_log SET created_at=datetime('now', '-100 days') WHERE event_type='scan'"
     )
