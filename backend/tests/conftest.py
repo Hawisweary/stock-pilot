@@ -1,9 +1,51 @@
 """共享测试 fixtures"""
 from __future__ import annotations
 
+import os
 import sqlite3
+import sys
 
 import pytest
+
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def redirect_db_paths(monkeypatch, db_path, cache_db_path=None) -> None:
+    """把 config 及所有已加载后端模块里的 DB_PATH / CACHE_DB_PATH 统一指向测试库。
+
+    很多模块用 `from config import DB_PATH` 在 import 时拷贝路径,只 patch config.DB_PATH
+    对它们无效:它们会停留在"第一次被 import 时"的路径(上一个测试的临时库,或真实 afr.db)。
+    这里遍历 sys.modules,把这些拷贝一并 monkeypatch(测试结束自动还原)。
+    本测试内才首次 import 的模块会直接拿到已 patch 的 config 值;下个测试再调用本函数时会被重新指向。
+    """
+    import config
+
+    targets = {"DB_PATH": str(db_path)}
+    if cache_db_path is not None:
+        targets["CACHE_DB_PATH"] = str(cache_db_path)
+
+    for name, value in targets.items():
+        monkeypatch.setattr(config, name, value)
+
+    for mod in list(sys.modules.values()):
+        mod_file = getattr(mod, "__file__", None)
+        if not mod_file or not os.path.abspath(mod_file).startswith(_BACKEND_DIR + os.sep):
+            continue
+        for name, value in targets.items():
+            if isinstance(getattr(mod, name, None), str):
+                monkeypatch.setattr(mod, name, value)
+
+    if cache_db_path is not None and "database" in sys.modules:
+        # 新缓存库需重新建表
+        monkeypatch.setattr(sys.modules["database"], "_cache_tables_ready", False)
+
+
+@pytest.fixture()
+def redirect_db(monkeypatch):
+    """fixture 形式的 redirect_db_paths:redirect_db(db_path, cache_db_path=None)。"""
+    return lambda db_path, cache_db_path=None: redirect_db_paths(
+        monkeypatch, db_path, cache_db_path
+    )
 
 
 @pytest.fixture()
