@@ -4,7 +4,7 @@ from __future__ import annotations
 import sqlite3
 from typing import List, Optional, Protocol
 
-from config import DB_PATH, DB_READ_PATH, DATA_ENGINE
+from config import DB_PATH, DATA_ENGINE
 
 
 class TimeSeriesStore(Protocol):
@@ -20,13 +20,10 @@ class TimeSeriesStore(Protocol):
 
 
 class SQLiteStore:
-    """只读行情访问，优先读 snapshot 副本"""
+    """只读行情访问(只读副本 afr_read.db 已停用,P4;直接读主库,WAL 可并发读)"""
 
     def __init__(self, db_path: Optional[str] = None):
-        import os
-
-        read = db_path or DB_READ_PATH
-        self.path = read if os.path.exists(read) else DB_PATH
+        self.path = db_path or DB_PATH
 
     def read_bars(
         self,

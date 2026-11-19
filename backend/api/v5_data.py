@@ -729,27 +729,6 @@ async def market_regime_hmm_compare(days: int = 730, persist: bool = False):
     return report
 
 
-@router.get("/market-regime/cluster/compare")
-async def market_regime_cluster_compare(
-    days: int = 730,
-    persist: bool = False,
-    method: str = "both",
-):
-    """P3-D：K-Means / GMM vs 规则 L1 对照（可选落库）。"""
-    from database import get as get_db_conn
-    from services.regime_cluster import (
-        compare_cluster_vs_rules,
-        fit_and_persist_full_sample,
-    )
-
-    methods = ("kmeans", "gmm") if method == "both" else (method,)
-    conn = get_db_conn()
-    report = compare_cluster_vs_rules(conn, days=max(90, min(days, 730)), methods=methods)
-    if persist and not report.get("error"):
-        report["persist"] = fit_and_persist_full_sample(conn, days=days, methods=methods)
-    return report
-
-
 @router.get("/market-regime/jump/compare")
 async def market_regime_jump_compare(
     days: int = 730,

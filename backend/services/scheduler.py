@@ -768,18 +768,7 @@ def run_daily_tasks():
     except Exception as e:
         msg += f"ML:{e} "
 
-    try:
-        _dlog(_fh, "▶ DB快照")
-        import os
-        import subprocess
-
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        snap = os.path.join(root, "scripts", "db_snapshot.sh")
-        if os.path.isfile(snap):
-            subprocess.run(["bash", snap], cwd=root, capture_output=True, timeout=60, check=False)
-            msg += "DB快照OK "
-    except Exception as e:
-        msg += f"DB快照:{e} "
+    # 原"DB快照"(每天把主库整库复制成 afr_read.db)已停用(P4):读取方改读主库
 
     try:
         _dlog(_fh, "▶ 备份")

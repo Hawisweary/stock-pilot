@@ -81,6 +81,14 @@ def main() -> int:
         errs = {k: str(v.get("error"))[:80] for k, v in steps.items() if isinstance(v, dict) and v.get("error")}
         summary = f"ok={r.get('ok')} steps={list(steps.keys())} errors={errs or '无'}"
 
+        # 日志保留期 90 天(P4)
+        try:
+            from database import prune_cache_logs
+
+            summary += f" pruned={prune_cache_logs(90)}"
+        except Exception as e:
+            summary += f" prune_err:{str(e)[:40]}"
+
         # 周频 Tushare 数据：业绩预告/快报 + 财报披露计划
         for script_name, label, extra_args in [
             ("tushare_sync_earnings_alerts.py", "earnings_alerts", ["--years", "1"]),

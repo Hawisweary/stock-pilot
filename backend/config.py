@@ -14,7 +14,6 @@ if os.path.exists(_env_path):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.dirname(BASE_DIR), "data")
 DB_PATH = os.path.join(DATA_DIR, "afr.db")
-DB_READ_PATH = os.getenv("AFR_DB_READ_PATH", os.path.join(DATA_DIR, "afr_read.db"))
 # 缓存/日志类表独立库：API 高频小写入与主库批任务写锁彻底解耦
 CACHE_DB_PATH = os.getenv("AFR_CACHE_DB_PATH", os.path.join(DATA_DIR, "cache.db"))
 US_DB_PATH = os.getenv("AFR_US_DB_PATH", os.path.join(DATA_DIR, "us.db"))  # 美股独立库,避开主库锁竞争

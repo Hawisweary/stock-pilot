@@ -1,5 +1,5 @@
 """风控评分引擎 V1 — 波动率 + 最大回撤 + 流动性 + VaR"""
-import sqlite3, math, json
+import sqlite3, math
 from datetime import date, datetime
 from config import DB_PATH, DEFAULT_SCORE
 from services.comprehensive_store import upsert_dimension_score
@@ -68,7 +68,6 @@ def compute_all_risk_scores(calc_date: str = None):
     
     vars_sorted = sorted([r["var_95"] for r in results])
     
-    events = []
     for r in results:
         # 流动性得分（log成交额分位）
         liq_pct = sum(1 for a in amt_logs if a <= math.log(max(r["avg_amount"],1))) / N
@@ -83,24 +82,8 @@ def compute_all_risk_scores(calc_date: str = None):
         conn.execute("""UPDATE comprehensive_scores SET max_drawdown_60d=?, volatility_20d=?
             WHERE stock_id=? AND calc_date=?""",
             (r["max_dd"], r["vol_20d"], r["stock_id"], calc_date))
-        
-        # 风险事件记录
-        flags = []
-        if r["vol_20d"] > 0.40:
-            flags.append(("volatility_breach", "critical", f"年化波动率{r['vol_20d']*100:.0f}%"))
-        elif r["vol_20d"] > 0.30:
-            flags.append(("volatility_breach", "warning", f"年化波动率{r['vol_20d']*100:.0f}%"))
-        if r["max_dd"] > 0.20:
-            flags.append(("drawdown_breach", "critical", f"最大回撤{r['max_dd']*100:.0f}%"))
-        elif r["max_dd"] > 0.08:
-            flags.append(("drawdown_breach", "warning", f"回撤{r['max_dd']*100:.0f}%超8%阈值"))
-        
-        for et, sev, det in flags:
-            events.append((r["stock_id"], calc_date, et, sev, json.dumps({"detail": det, "risk_score": risk}, ensure_ascii=False)))
 
-    if events:
-        conn.executemany("INSERT INTO risk_events (stock_id, calc_date, event_type, severity, detail_json) VALUES (?,?,?,?,?)", events)
-    
+
     conn.commit()
     conn.close()
     return len(results)

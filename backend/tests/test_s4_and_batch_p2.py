@@ -24,24 +24,6 @@ def test_validate_cross_section_expression():
     assert ok["kind"] == "cross_section"
 
 
-def test_debate_batch_log_query(tmp_path, monkeypatch):
-    db_path = tmp_path / "debate.db"
-    monkeypatch.setattr("config.DB_PATH", str(db_path))
-    monkeypatch.setattr("services.debate_batch_log.config.DB_PATH", str(db_path))
-
-    from services.debate_batch_log import ensure_table, log_batch_start, query_debate_history
-
-    ensure_table()
-    log_batch_start(
-        job_id="j1",
-        mode="tiered",
-        plan={"calc_date": "2026-05-29", "today": "2026-05-29", "total": 10, "to_run": 5},
-    )
-    rows = query_debate_history(limit=5, job_id="j1")
-    assert len(rows) == 1
-    assert rows[0]["event_type"] == "start"
-
-
 def test_factor_percentile_cache(tmp_path, monkeypatch):
     db_path = tmp_path / "pct.db"
     monkeypatch.setattr("config.DB_PATH", str(db_path))

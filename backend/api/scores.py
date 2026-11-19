@@ -532,27 +532,6 @@ async def correlation_matrix():
     return {"matrix": matrix, "high_corr_pairs": pairs[:10], "stock_count": n}
 
 
-@router.post("/scores/multicyc/{stock_id}")
-async def compute_multicyc(stock_id: int):
-    """计算多周期技术面"""
-    stock = execute_sql("SELECT code FROM stocks WHERE id=? AND is_active=1", (stock_id,))
-    if not stock: raise HTTPException(status_code=404)
-    from services.multicyc import compute_multicyc_signal
-    return compute_multicyc_signal(stock_id, stock[0]["code"])
-
-
-@router.get("/scores/multicyc/{stock_id}")
-async def get_multicyc(stock_id: int):
-    """获取多周期技术面"""
-    import sqlite3
-    conn = sqlite3.connect(DB_PATH); conn.row_factory = sqlite3.Row
-    row = conn.execute(
-        "SELECT * FROM multicyc_scores WHERE stock_id=? ORDER BY date DESC LIMIT 1",
-        (stock_id,)).fetchone()
-    conn.close()
-    return {"stock_id": stock_id, "score": dict(row) if row else None}
-
-
 @router.get("/scores/heatmap")
 async def score_heatmap():
     """评分热力图矩阵（v3.0：使用 v_stock_scores，综合分 = composite_v5）"""

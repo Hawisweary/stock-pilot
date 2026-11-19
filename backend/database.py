@@ -90,6 +90,20 @@ def cache_connect() -> sqlite3.Connection:
     return conn
 
 
+def prune_cache_logs(days: int = 90) -> dict:
+    """日志保留期(P4):cache.db 里的抓取日志和评分缺口日志只留最近 days 天。"""
+    conn = cache_connect()
+    try:
+        out = {}
+        for table, col in (("data_fetch_log", "fetch_time"), ("score_gap_log", "created_at")):
+            cur = conn.execute(f"DELETE FROM {table} WHERE {col} < datetime('now', ?)", (f"-{int(days)} days",))
+            out[table] = cur.rowcount
+        conn.commit()
+        return out
+    finally:
+        conn.close()
+
+
 def get_db_path() -> str:
     """获取数据库文件路径"""
     return DB_PATH
@@ -284,21 +298,7 @@ def _create_tables():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_scores_date ON factor_scores(calc_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_scores_composite ON factor_scores(composite_score DESC)")
 
-    # 6. 数据抓取日志
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS data_fetch_log (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            stock_id        INTEGER,
-            data_type       TEXT NOT NULL,
-            fetch_time      TEXT NOT NULL DEFAULT (datetime('now')),
-            status          TEXT NOT NULL DEFAULT 'success',
-            records_count   INTEGER DEFAULT 0,
-            error_message   TEXT DEFAULT '',
-            duration_ms     INTEGER DEFAULT 0,
-            source          TEXT DEFAULT ''
-        )
-    """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_fetch_log_time ON data_fetch_log(fetch_time)")
+    # 6. 数据抓取日志:已迁到缓存库 cache.db(见 _CACHE_TABLES_SQL),主库不再建这张表(P4)
 
     # 7. AI 分析记录
     conn.execute("""

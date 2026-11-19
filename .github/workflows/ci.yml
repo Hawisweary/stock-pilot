@@ -30,7 +30,6 @@ jobs:
             tests/test_onboard.py \
             tests/test_pnl_metrics.py \
             tests/test_profile_isolation.py \
-            tests/test_regime_cluster.py \
             tests/test_regime_jump.py \
             tests/test_regime_validation.py \
             tests/test_technical_rule_engine.py \

@@ -75,15 +75,3 @@ def refresh_daily_baseline(conn: Optional[sqlite3.Connection] = None) -> dict:
     if own:
         conn.close()
     return {"calc_date": calc_date, "stock_count": len(data.get("universe_ids", []))}
-
-
-def ensure_cache_table(conn: sqlite3.Connection) -> None:
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS factor_metrics_cache (
-            cache_key TEXT PRIMARY KEY,
-            calc_date TEXT NOT NULL,
-            benchmark_mode TEXT NOT NULL,
-            stock_count INTEGER DEFAULT 0,
-            updated_at TEXT DEFAULT (datetime('now'))
-        )
-    """)

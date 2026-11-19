@@ -78,10 +78,6 @@ def _fetch_all_data(stock_id: int) -> dict:
                 except: pass
             result[label] = d
 
-    # 多周期
-    mc = _safe_query(conn, "SELECT * FROM multicyc_scores WHERE stock_id=? ORDER BY date DESC LIMIT 1", (stock_id,))
-    result["multicyc"] = dict(mc) if mc else None
-
     q = _safe_query(
         conn,
         "SELECT * FROM stock_daily_quotes WHERE stock_id=? ORDER BY trade_date DESC LIMIT 1",
@@ -131,17 +127,6 @@ def _build_report_html(data: dict) -> str:
             <div class="item">RSI14: {b.get('rsi14','?')}</div>
             <div class="item">KDJ-K: {b.get('kdj_k','?')}</div>
             <div class="item">MACD: {b.get('macd_signal','?')}</div>
-        </div>"""
-
-    # 多周期
-    multicyc_html = ""
-    if data.get("multicyc"):
-        m = data["multicyc"]
-        multicyc_html = f"""
-        <div class="card">
-            <h3>📊 多周期分析</h3>
-            <p>{m.get('signal','')}</p>
-            <p>日线{m.get('daily',{}).get('trend','')} | 周线{m.get('weekly',{}).get('trend','')} | 月线{m.get('monthly',{}).get('trend','')}</p>
         </div>"""
 
     return f"""<!DOCTYPE html>
@@ -205,7 +190,6 @@ li{{margin:4px 0}}
     <div class="item"><div class="val">{tech.get('signal','?')}</div><div class="lbl">信号</div></div>
 </div>
 {tech_signals}
-{multicyc_html}
 
 <h2>💰 资金面</h2>
 <div class="grid">

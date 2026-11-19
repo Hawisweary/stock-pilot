@@ -30,8 +30,7 @@ def main() -> int:
     merge = run_preset_merges()
     ml_train = run_qlib_train_job({"train_days": 120})
     ml_sync = sync_ml_to_comprehensive() if ml_train.get("status") == "done" else {"skipped": True}
-    snap = subprocess.run(["bash", os.path.join(ROOT, "scripts", "db_snapshot.sh")], cwd=ROOT, capture_output=True, text=True)
-    bt = subprocess.run(
+    bt =subprocess.run(
         [sys.executable, os.path.join(ROOT, "scripts", "reconcile_backtest.py")],
         cwd=ROOT,
         capture_output=True,
@@ -45,7 +44,7 @@ def main() -> int:
         "merge": {"success_count": merge.get("success_count"), "presets_run": merge.get("presets_run")},
         "ml_train": ml_train,
         "ml_sync": ml_sync,
-        "db_snapshot": snap.returncode == 0,
+        "db_snapshot": "停用(P4:只读副本 afr_read.db 不再生成)",
         "backtest_reconcile_ok": bt.returncode == 0,
         "upgrade_metrics": metrics,
         "env": {

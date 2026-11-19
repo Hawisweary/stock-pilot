@@ -152,14 +152,6 @@ def main() -> int:
         "_elapsed_ms": results["gp"].get("_elapsed_ms"),
     }, ensure_ascii=False, indent=2))
 
-    print("\n=== 9. debate_batch_log 查询 ===")
-    results["debate_history"] = call("GET", "/debate/batch/history?limit=3", timeout=15)
-    print(json.dumps({
-        "count": len(results["debate_history"].get("history", [])),
-        "sample": (results["debate_history"].get("history") or [])[:1],
-        "_elapsed_ms": results["debate_history"].get("_elapsed_ms"),
-    }, ensure_ascii=False, indent=2))
-
     ok = True
     for key in ("factor_full", "factor_incremental", "batch_sync", "expr_validate", "gp"):
         if results.get(key, {}).get("error"):

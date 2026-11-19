@@ -20,12 +20,7 @@ def _issue(level: str, module: str, msg: str, metric: str = "") -> dict:
 
 
 def get_data_quality_metrics(db_path: str = None) -> dict:
-    from config import DB_READ_PATH
-    import os
-
-    path = db_path or DB_PATH
-    if not db_path and os.path.isfile(DB_READ_PATH):
-        path = DB_READ_PATH
+    path = db_path or DB_PATH  # 只读副本 afr_read.db 已停用(P4),直接读主库(WAL 可并发读)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
 
@@ -106,12 +101,7 @@ def get_data_quality_metrics(db_path: str = None) -> dict:
 
 
 def get_migration_progress(db_path: str = None) -> dict:
-    from config import DB_READ_PATH
-    import os
-
-    path = db_path or DB_PATH
-    if not db_path and os.path.isfile(DB_READ_PATH):
-        path = DB_READ_PATH
+    path = db_path or DB_PATH  # 只读副本 afr_read.db 已停用(P4),直接读主库(WAL 可并发读)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
 
