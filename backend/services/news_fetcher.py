@@ -26,7 +26,7 @@ def _insert_news_rows(stock_id: int, articles: list[dict]) -> int:
         if not title:
             continue
         try:
-            conn.execute(
+            cur = conn.execute(
                 """INSERT OR IGNORE INTO stock_news (stock_id, title, content, source, pub_date, url)
                    VALUES (?,?,?,?,?,?)""",
                 (
@@ -38,7 +38,7 @@ def _insert_news_rows(stock_id: int, articles: list[dict]) -> int:
                     str(a.get("url", "")),
                 ),
             )
-            if conn.total_changes > 0:
+            if cur.rowcount:
                 added += 1
         except Exception:
             pass
@@ -47,8 +47,8 @@ def _insert_news_rows(stock_id: int, articles: list[dict]) -> int:
     return added
 
 
-def fetch_news_for_stock(stock_id: int, code: str, limit: int = 10) -> int:
-    """抓取新闻存入 DB（东财直连 → akshare fallback），返回新增数"""
+def _fetch_news_articles(code: str, limit: int = 10) -> list[dict]:
+    """只做网络抓取(东财直连 → akshare fallback),不碰数据库。"""
     articles: list[dict] = []
 
     try:
@@ -88,7 +88,11 @@ def fetch_news_for_stock(stock_id: int, code: str, limit: int = 10) -> int:
                     articles.append(dict(row))
         except Exception:
             pass
+    return articles
 
+
+def _store_news(stock_id: int, articles: list[dict], limit: int = 10) -> int:
+    """入库并在有新增时触发该股事件分类,返回新增条数。"""
     added = _insert_news_rows(stock_id, articles)
     if added > 0:
         try:
@@ -100,14 +104,27 @@ def fetch_news_for_stock(stock_id: int, code: str, limit: int = 10) -> int:
     return added
 
 
+def fetch_news_for_stock(stock_id: int, code: str, limit: int = 10) -> int:
+    """抓取新闻存入 DB（东财直连 → akshare fallback），返回新增数"""
+    return _store_news(stock_id, _fetch_news_articles(code, limit=limit), limit=limit)
+
+
 def sync_all_news(
     stock_ids: list[int] | None = None,
     *,
     limit: int = 15,
     sleep_s: float = 0.25,
+    workers: int = 1,
+    budget_s: float | None = None,
+    cursor_key: str | None = None,
+    log=None,
 ) -> dict:
-    """全市场/指定股票批量抓取新闻并触发事件分类。"""
-    import time
+    """全市场/指定股票批量抓取新闻并触发事件分类。
+
+    网络抓取可多线程并发,入库和分类在本线程按顺序做(见 services.rotating_fetch);
+    默认值等同原来的串行全量抓取。
+    """
+    from services.rotating_fetch import run_rotating_fetch
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -126,22 +143,19 @@ def sync_all_news(
     finally:
         conn.close()
 
-    added = 0
-    errors: list[str] = []
-    for row in rows:
-        sid, code = int(row["id"]), row["code"]
-        try:
-            added += fetch_news_for_stock(sid, code, limit=limit)
-        except Exception as e:
-            errors.append(f"{code}:{e}")
-        time.sleep(sleep_s)
-
-    return {
-        "stocks": len(rows),
-        "added": added,
-        "limit_per_stock": limit,
-        "errors": errors[:10],
-    }
+    r = run_rotating_fetch(
+        [(int(x["id"]), x["code"]) for x in rows],
+        fetch=lambda code: _fetch_news_articles(code, limit=limit),
+        store=lambda sid, articles: _store_news(sid, articles, limit=limit),
+        workers=workers,
+        sleep_s=sleep_s,
+        budget_s=budget_s,
+        cursor_key=cursor_key,
+        log=log,
+        label="新闻",
+    )
+    r["limit_per_stock"] = limit
+    return r
 
 
 def score_text_keywords(text: str) -> tuple[float, str]:

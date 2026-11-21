@@ -1,6 +1,6 @@
 """调度作业子进程入口 — 重任务在独立进程运行，不占用 API 进程线程池。
 
-用法: python scripts/run_scheduled_job.py {nightly|weekly|daily|technical_retry}
+用法: python scripts/run_scheduled_job.py {nightly|weekly|daily|technical_retry|policy_scan|...}
 最后一行输出 JSON 结果，供调度器捕获记录。
 """
 import argparse
@@ -40,7 +40,7 @@ def _run_script_subprocess(script_name: str, args: list[str], timeout_sec: int =
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("job", choices=["nightly", "weekly", "daily", "morning", "technical_retry", "warm_cache", "warm_decay", "regime_l2_l3", "us_daily"])
+    parser.add_argument("job", choices=["nightly", "weekly", "daily", "morning", "technical_retry", "warm_cache", "warm_decay", "regime_l2_l3", "us_daily", "policy_scan"])
     parser.add_argument("--factor", default=None, help="warm_decay: 因子ID")
     parser.add_argument("--fd", type=int, default=20, help="warm_decay: 未来收益天数")
     args = parser.parse_args()
@@ -56,11 +56,22 @@ def main() -> int:
         print(json.dumps({"job": args.job, "ok": False, "summary": "已有同类作业在运行,本次跳过"}, ensure_ascii=False))
         return 0
 
+    ok = True
     if args.job == "nightly":
+        import time
+
+        from services.job_log import JobLog
         from services.v5_data_sync import sync_v5_nightly_fetch
 
-        r = sync_v5_nightly_fetch()
-        summary = f"ok={r.get('ok')} coverage={r.get('news_event_coverage')}"
+        # 分步日志(P14):子进程输出会被调度器捕获,被强杀后只有这个文件能看出卡在哪一步
+        log = JobLog("nightly")
+        t_all = time.time()
+        log("════ nightly 开始 ════")
+        r = sync_v5_nightly_fetch(log=log)
+        steps = r.get("steps") or {}
+        errs = {k: str(v.get("error"))[:80] for k, v in steps.items() if isinstance(v, dict) and v.get("error")}
+        ok = not errs
+        summary = f"ok={ok} errors={errs or '无'} coverage={r.get('news_event_coverage')}"
 
         # 日频 Tushare 数据：新股发现 + L2 资金流明细 + 沪深股通十大成交
         for script_name, label, extra_args in [
@@ -68,11 +79,29 @@ def main() -> int:
             ("tushare_sync_moneyflow_detail.py", "moneyflow", ["--days", "10"]),
             ("tushare_sync_hsgt_top10.py", "hsgt_top10", ["--days", "10"]),
         ]:
+            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), script_name)
+            if not os.path.isfile(script_path):
+                # 例:tushare_sync_new_shares.py 未入库,主机上没有。原来夜间从没跑到这里,不曾暴露
+                summary += f" {label}=跳过(脚本不存在)"
+                log(f"· {label} 跳过:{script_name} 不存在")
+                continue
+            log(f"▶ {label} 开始")
+            t0 = time.time()
             try:
                 last = _run_script_subprocess(script_name, extra_args, timeout_sec=1800)
                 summary += f" {label}={last[:60]}"
+                log(f"✓ {label} {time.time() - t0:.0f}s {last[:120]}")
             except Exception as e:
+                ok = False
                 summary += f" {label}_err:{str(e)[:40]}"
+                log(f"✗ {label} {time.time() - t0:.0f}s 失败: {str(e)[:200]}")
+        log(f"════ nightly 结束 {time.time() - t_all:.0f}s ok={ok} ════")
+        log.close()
+    elif args.job == "policy_scan":
+        # 全局政策快照(DeepSeek),默认不在夜间跑(config.NIGHTLY_GLOBAL_POLICY_SCAN),需要时手动执行
+        from services.policy_global import global_policy_scan
+
+        summary = str(global_policy_scan())[:300]
     elif args.job == "weekly":
         from services.v5_data_sync import sync_v5_weekly
 
@@ -156,7 +185,8 @@ def main() -> int:
 
         summary = str(run_daily_tasks())[:600]
 
-    print(json.dumps({"job": args.job, "ok": True, "summary": summary}, ensure_ascii=False))
+    # ok=False 表示作业跑完了但有步骤失败(调度器记为 partial)
+    print(json.dumps({"job": args.job, "ok": ok, "summary": summary}, ensure_ascii=False))
     return 0
 
 

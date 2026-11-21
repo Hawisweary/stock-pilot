@@ -164,6 +164,33 @@ def _save_state(key: str, value: str) -> None:
         logger.warning("[Scheduler] 保存调度状态失败 %s=%s: %s", key, value, e)
 
 
+def _status_from_output(out: str) -> str:
+    """子进程最后一行 JSON 里 ok=False → partial(跑完了但有步骤失败);解析不了按 ok。"""
+    try:
+        return "ok" if json.loads(out).get("ok", True) else "partial"
+    except Exception:
+        return "ok"
+
+
+def _status_from_error(e: Exception) -> str:
+    return "timeout" if "timeout" in str(e).lower() or "exit=-9" in str(e) else "failed"
+
+
+def _record_job_result(job: str, status: str, detail: str = "") -> None:
+    """记录作业最近一次的真实结果(P14):ok / partial / failed / timeout。
+
+    与"今天已执行"的日期标记分开:日期标记照旧写(否则失败后每 30 秒会重跑一个
+    数小时的作业),但这里能看出最近一次是否成功、最近一次成功是哪天。
+    夜间公告/新闻抓取另有游标续抓(services.rotating_fetch),被打断的部分下一轮会接着做。
+    """
+    now = datetime.now(_TZ_CN)
+    _save_state(f"last_{job}_status", status)
+    _save_state(f"last_{job}_status_at", now.strftime("%Y-%m-%d %H:%M"))
+    _save_state(f"last_{job}_detail", (detail or "")[:300])
+    if status == "ok":
+        _save_state(f"last_{job}_ok_date", now.strftime("%Y-%m-%d"))
+
+
 def _weekly_overdue_days(last_date: str | None, today_key: str) -> int:
     """距上次成功周度同步的天数(用于错过整个触发日后的补跑判断)。"""
     if not last_date:
@@ -257,8 +284,10 @@ def start_scheduler(app):
                 try:
                     out = _run_job_subprocess("nightly", timeout_sec=3 * 3600)
                     logger.info("[Scheduler] V5 nightly fetch(子进程): %s", out)
+                    _record_job_result("nightly", _status_from_output(out), out)
                 except Exception as e:
                     logger.warning("[Scheduler] V5 nightly fetch failed: %s", e)
+                    _record_job_result("nightly", _status_from_error(e), str(e))
                 state[_STATE_KEYS["nightly_fetch"]] = today_key
                 _save_state(_STATE_KEYS["nightly_fetch"], today_key)
             if (
@@ -276,12 +305,14 @@ def start_scheduler(app):
                 try:
                     out = _run_job_subprocess("weekly", timeout_sec=6 * 3600)
                     logger.info("[Scheduler] V5 weekly sync(子进程): %s", out)
+                    _record_job_result("weekly", _status_from_output(out), out)
                     # 每周同步申万行业分类
                     import subprocess, sys, os
                     script = os.path.join(os.path.dirname(os.path.dirname(__file__)), "scripts", "sync_industry_batch.py")
                     subprocess.Popen([sys.executable, script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception as e:
                     logger.warning("[Scheduler] V5 weekly sync failed: %s", e)
+                    _record_job_result("weekly", _status_from_error(e), str(e))
                 state[_STATE_KEYS["weekly_sync"]] = today_key
                 _save_state(_STATE_KEYS["weekly_sync"], today_key)
             if (
@@ -291,8 +322,10 @@ def start_scheduler(app):
                 try:
                     out = _run_job_subprocess("technical_retry", timeout_sec=3600)
                     logger.info("[Scheduler] technical no_source retry(子进程): %s", out)
+                    _record_job_result("technical_retry", _status_from_output(out), out)
                 except Exception as e:
                     logger.warning("[Scheduler] technical retry failed: %s", e)
+                    _record_job_result("technical_retry", _status_from_error(e), str(e))
                 state[_STATE_KEYS["technical_retry"]] = today_key
                 _save_state(_STATE_KEYS["technical_retry"], today_key)
             if (
@@ -304,8 +337,10 @@ def start_scheduler(app):
                 try:
                     out = _run_job_subprocess("morning", timeout_sec=1800)
                     logger.info("[Scheduler] 开盘执行任务(子进程): %s", out)
+                    _record_job_result("morning", _status_from_output(out), out)
                 except Exception as e:
                     logger.warning("[Scheduler] run_morning_tasks failed: %s", e)
+                    _record_job_result("morning", _status_from_error(e), str(e))
                     # 锁类失败=瞬态(nightly/批任务持写锁)→ 不落 done 标记,下轮(30s)重试直到锁释放。
                     # 否则一次撞锁就被标记完成、当天永不再执行——开盘建仓/调仓永久不落地的元凶。
                     morning_locked = "locked" in str(e).lower()
@@ -320,8 +355,10 @@ def start_scheduler(app):
                 try:
                     out = _run_job_subprocess("daily", timeout_sec=3 * 3600)
                     logger.info("[Scheduler] 每日任务(子进程): %s", out)
+                    _record_job_result("daily", _status_from_output(out), out)
                 except Exception as e:
                     logger.warning("[Scheduler] run_daily_tasks failed: %s", e)
+                    _record_job_result("daily", _status_from_error(e), str(e))
                 state[_STATE_KEYS["daily_tasks"]] = today_key
                 _save_state(_STATE_KEYS["daily_tasks"], today_key)
 
@@ -338,8 +375,10 @@ def start_scheduler(app):
                 try:
                     out = _run_job_subprocess("us_daily", timeout_sec=2400)
                     logger.info("[Scheduler] 美股同步(子进程): %s", out)
+                    _record_job_result("us_daily", _status_from_output(out), out)
                 except Exception as e:
                     logger.warning("[Scheduler] us_daily failed: %s", e)
+                    _record_job_result("us_daily", _status_from_error(e), str(e))
                 state[_STATE_KEYS["us_daily"]] = us_key
                 _save_state(_STATE_KEYS["us_daily"], us_key)
             time.sleep(30)

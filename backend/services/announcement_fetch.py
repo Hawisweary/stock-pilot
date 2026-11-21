@@ -148,20 +148,10 @@ def fetch_announcements_for_stock(code: str, limit: int = 30) -> list[dict]:
     return rows[:limit]
 
 
-def sync_announcements(
-    stock_id: int,
-    code: str,
-    *,
-    limit: int = 30,
-    conn: Optional[sqlite3.Connection] = None,
-) -> int:
-    own = conn is None
-    if own:
-        conn = sqlite3.connect(DB_PATH)
-    ensure_announcements_table(conn)
-    articles = fetch_announcements_for_stock(code, limit=limit)
+def _insert_announcements(conn: sqlite3.Connection, stock_id: int, articles: list[dict]) -> int:
+    """写入一只股票的公告,返回新增条数。不 commit(由调用方决定提交时机)。"""
     added = 0
-    for a in articles:
+    for a in articles or []:
         art_code = a.get("art_code") or a["title"][:40]
         cur = conn.execute(
             """INSERT OR IGNORE INTO stock_announcements
@@ -180,6 +170,22 @@ def sync_announcements(
         )
         if cur.rowcount:
             added += 1
+    return added
+
+
+def sync_announcements(
+    stock_id: int,
+    code: str,
+    *,
+    limit: int = 30,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    own = conn is None
+    if own:
+        conn = sqlite3.connect(DB_PATH)
+    ensure_announcements_table(conn)
+    articles = fetch_announcements_for_stock(code, limit=limit)
+    added = _insert_announcements(conn, stock_id, articles)
     if own:
         conn.commit()
         conn.close()
@@ -191,13 +197,22 @@ def sync_all_announcements(
     *,
     limit: int = 30,
     sleep_s: float = 0.2,
+    workers: int = 1,
+    budget_s: float | None = None,
+    cursor_key: str | None = None,
+    log=None,
 ) -> dict:
-    """全市场/指定股票批量抓取公告入库。"""
-    import time
+    """全市场/指定股票批量抓取公告入库。
 
-    conn = sqlite3.connect(DB_PATH)
+    每 50 只提交一次(P14:原来全部抓完才提交,一个写事务开约 2 小时,其间别的进程写不进库)。
+    workers / budget_s / cursor_key 见 services.rotating_fetch;默认值等同原来的串行全量抓取。
+    """
+    from services.rotating_fetch import run_rotating_fetch
+
+    conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.row_factory = sqlite3.Row
     ensure_announcements_table(conn)
+    conn.commit()
     try:
         if stock_ids:
             ph = ",".join("?" * len(stock_ids))
@@ -210,27 +225,23 @@ def sync_all_announcements(
             rows = conn.execute(
                 "SELECT id, code FROM stocks WHERE is_active=1 ORDER BY id"
             ).fetchall()
+        r = run_rotating_fetch(
+            [(int(x["id"]), x["code"]) for x in rows],
+            fetch=lambda code: fetch_announcements_for_stock(code, limit=limit),
+            store=lambda sid, articles: _insert_announcements(conn, sid, articles),
+            workers=workers,
+            sleep_s=sleep_s,
+            budget_s=budget_s,
+            cursor_key=cursor_key,
+            on_batch=conn.commit,
+            log=log,
+            label="公告",
+        )
     finally:
-        pass
-
-    added = 0
-    errors: list[str] = []
-    for row in rows:
-        sid, code = int(row["id"]), row["code"]
-        try:
-            added += sync_announcements(sid, code, limit=limit, conn=conn)
-        except Exception as e:
-            errors.append(f"{code}:{e}")
-        time.sleep(sleep_s)
-
-    conn.commit()
-    conn.close()
-    return {
-        "stocks": len(rows),
-        "added": added,
-        "limit_per_stock": limit,
-        "errors": errors[:10],
-    }
+        conn.commit()
+        conn.close()
+    r["limit_per_stock"] = limit
+    return r
 
 
 def get_announcements_from_db(stock_id: int, limit: int = 30) -> list[dict]:

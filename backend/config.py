@@ -260,6 +260,14 @@ EVENT_LLM_SLEEP_MS = int(os.getenv("AFR_EVENT_LLM_SLEEP_MS", "0"))
 # V5 调度：夜间抓取 / 收盘评分刷新
 V5_NIGHTLY_FETCH_HOUR = int(os.getenv("AFR_V5_NIGHTLY_FETCH_HOUR", "2"))
 V5_NIGHTLY_FETCH_MINUTE = int(os.getenv("AFR_V5_NIGHTLY_FETCH_MINUTE", "0"))
+# 夜间公告/新闻抓取(P14):并发线程数、各自的时间预算(分钟);超预算停下,下次从游标处续抓。
+# 两步预算合计 90 分钟,给后面的步骤和 Tushare 脚本留出 3 小时超时内的余量。
+NIGHTLY_FETCH_WORKERS = int(os.getenv("AFR_NIGHTLY_FETCH_WORKERS", "4"))
+NIGHTLY_ANNOUNCEMENT_BUDGET_MIN = float(os.getenv("AFR_NIGHTLY_ANNOUNCEMENT_BUDGET_MIN", "45"))
+NIGHTLY_NEWS_BUDGET_MIN = float(os.getenv("AFR_NIGHTLY_NEWS_BUDGET_MIN", "45"))
+# 全局政策快照(DeepSeek 分批扫描)。默认关闭:LLM 调用量和费用待评估;需要时手动跑
+# `run_scheduled_job.py policy_scan`,或设为 1 后由夜间任务在最后执行。
+NIGHTLY_GLOBAL_POLICY_SCAN = env_bool("AFR_NIGHTLY_GLOBAL_POLICY_SCAN", False)
 # 周日 03:00 周频：EPS/行业上修/v5_metrics/宏观/主力流
 V5_WEEKLY_WEEKDAY = int(os.getenv("AFR_V5_WEEKLY_WEEKDAY", "6"))
 V5_WEEKLY_HOUR = int(os.getenv("AFR_V5_WEEKLY_HOUR", "3"))
