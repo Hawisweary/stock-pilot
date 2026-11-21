@@ -28,14 +28,14 @@ def _isolate_batch_fetch(monkeypatch):
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, redirect_db):
     db_path = tmp_path / "fetch_api.db"
     data_dir = tmp_path / "data"
     data_dir.mkdir(exist_ok=True)
     monkeypatch.setenv("AFR_API_KEY_REQUIRED", "false")
     import config
 
-    monkeypatch.setattr(config, "DB_PATH", str(db_path))
+    redirect_db(db_path, tmp_path / "cache.db")
     monkeypatch.setattr(config, "DATA_DIR", str(data_dir))
 
     import database as db
@@ -48,6 +48,9 @@ def client(tmp_path, monkeypatch):
         db._conn = None
 
     db.init(str(db_path))
+    from app import app  # noqa: F401
+
+    redirect_db(db_path, tmp_path / "cache.db")
     conn = db.get()
     conn.execute(
         """INSERT OR IGNORE INTO stocks (code, name, market, is_active)
@@ -127,7 +130,8 @@ def test_fetch_status_includes_mode(client):
     assert "success" in data
 
 
-def test_complete_job_batch_skips_per_stock_gap_sync():
+def test_complete_job_batch_skips_per_stock_gap_sync(client):
+    # 依赖 client:fetch_job 在 import 时拷贝 DB_PATH,不隔离会写到真实 afr.db
     from unittest.mock import patch
     from services.fetch_job import complete_job
 

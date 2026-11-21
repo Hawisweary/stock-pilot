@@ -17,9 +17,13 @@ def test_fetch_log_source_column():
     assert "source" in cols
 
 
-def test_data_fetcher_log_writes_source():
+def test_data_fetcher_log_writes_source(tmp_path, redirect_db):
     import sqlite3
+    from database import cache_connect
     from services.data_fetcher import DataFetcher
+
+    # _log 写的是缓存库(cache_connect),不是传入的 conn;重定向到临时库,别碰真实 cache.db
+    redirect_db(tmp_path / "afr.db", tmp_path / "cache.db")
 
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -32,5 +36,9 @@ def test_data_fetcher_log_writes_source():
     )
     conn.commit()
     DataFetcher(conn)._log(1, "quotes", "success", 10, source="tencent")
-    row = conn.execute("SELECT source FROM data_fetch_log").fetchone()
+    cconn = cache_connect()
+    try:
+        row = cconn.execute("SELECT source FROM data_fetch_log").fetchone()
+    finally:
+        cconn.close()
     assert row["source"] == "tencent"

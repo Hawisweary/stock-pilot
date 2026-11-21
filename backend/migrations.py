@@ -1320,6 +1320,30 @@ def _safe_add_column(conn: sqlite3.Connection, table: str, column: str, ddl: str
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
 
 
+def _split_complete_statements(sql_block: str) -> list[str]:
+    """按 sqlite3.complete_statement 切分 SQL,正确处理触发器 BEGIN...END、字符串/注释中的分号。"""
+    stmts: list[str] = []
+    buf = ""
+    for part in sql_block.split(";"):
+        buf += part + ";"
+        if sqlite3.complete_statement(buf):
+            s = buf.strip()
+            # 去掉只有注释/空白的片段
+            body = "\n".join(
+                ln for ln in s.splitlines() if not ln.strip().startswith("--")
+            ).strip()
+            if body and body != ";":
+                stmts.append(s)
+            buf = ""
+    if buf.strip(" \n\t;"):
+        tail = "\n".join(
+            ln for ln in buf.splitlines() if not ln.strip().startswith("--")
+        ).strip(" \n\t;")
+        if tail:
+            raise sqlite3.OperationalError(f"incomplete SQL statement in migration: {buf[:200]!r}")
+    return stmts
+
+
 def run_migrations(conn: sqlite3.Connection) -> int:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS schema_version (
@@ -1485,6 +1509,43 @@ def run_migrations(conn: sqlite3.Connection) -> int:
                 ("v5_breakdown_json", "v5_breakdown_json TEXT DEFAULT '{}'"),
             ]:
                 _safe_add_column(conn, "comprehensive_scores", col, ddl)
+        elif version == 37:
+            # v37 含 CREATE TRIGGER ... BEGIN ...; ... END; —— 按 ";" 粗拆会把触发器体拆断
+            # (sqlite3.OperationalError: incomplete input)。改为按完整语句执行,语义不变。
+            for s in _split_complete_statements(sql_block):
+                try:
+                    conn.execute(s)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        raise
+        elif version == 40:
+            # stock_concept_boards 原本由 services/astock_data.py 懒建;全新空库上 ALTER 会报
+            # "no such table"。先按 astock_data 的同一 schema 建表(已存在则不动),再幂等加列。
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS stock_concept_boards (
+                    stock_id  INTEGER NOT NULL,
+                    bk_code   TEXT NOT NULL,
+                    name      TEXT NOT NULL,
+                    type      TEXT NOT NULL DEFAULT '概念',
+                    fetched_date TEXT NOT NULL,
+                    PRIMARY KEY (stock_id, bk_code)
+                )
+            """)
+            _safe_add_column(
+                conn, "stock_concept_boards", "source", "source TEXT NOT NULL DEFAULT 'unknown'"
+            )
+        elif version == 49:
+            # factor_values 原本由 services/factor_factory.init_factor_store 懒建;全新空库上
+            # 建索引会报 "no such table"。先按同一 schema 建表(已存在则不动),再建索引。
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS factor_values (
+                    stock_id INTEGER, date TEXT, factor_id TEXT,
+                    value REAL, rank INTEGER,
+                    PRIMARY KEY (stock_id, date, factor_id)
+                )
+            """)
+            for s in _split_complete_statements(sql_block):
+                conn.execute(s)
         else:
             for stmt in sql_block.strip().split(";"):
                 s = stmt.strip()
